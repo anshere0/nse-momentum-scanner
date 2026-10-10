@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-green: #00e676;
+  --color-brand-green-dark: #00c853;
+  --color-brand-red: #ff3d00;
+  --color-brand-red-dark: #dd2c00;
+  --color-brand-dark: #0a0d14;
+  --color-brand-card: #131722;
+  --color-brand-border: #2a2e39;
+  
+  --font-sans: 'Inter', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-brand-dark);
+    background-image: radial-gradient(circle at 50% 0%, #1a2235 0%, transparent 50%);
+    color: #d1d5db;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+.glass-panel {
+  background: rgba(19, 23, 34, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--color-brand-border);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.text-glow-green {
+  text-shadow: 0 0 10px rgba(0, 230, 118, 0.4);
+}
+
+.text-glow-red {
+  text-shadow: 0 0 10px rgba(255, 61, 0, 0.4);
+}
+
+/* Custom scrollbar for webkit */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent; 
+}
+ 
+::-webkit-scrollbar-thumb {
+  background: #2a2e39; 
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3f4555; 
+}
