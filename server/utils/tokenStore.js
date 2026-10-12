@@ -32,6 +32,16 @@ const tokenStore = {
       logger.error('Failed to load token:', err);
     }
     return null;
+  },
+  clear: () => {
+    try {
+      if (fs.existsSync(tokenFile)) {
+        fs.unlinkSync(tokenFile);
+        logger.info('Saved token cleared from disk');
+      }
+    } catch (err) {
+      logger.error('Failed to clear token:', err);
+    }
   }
 };
 

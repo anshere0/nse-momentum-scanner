@@ -1,8 +1,9 @@
 const logger = require('../utils/logger');
+const marketSession = require('../services/marketSession');
 
-// Mock data generator for local development
+// Mock data generator for local development & automated offline testing
 const mockFnoSymbols = [
-  'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBI', 'BAJFINANCE', 
+  'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BAJFINANCE',
   'BHARTIARTL', 'KOTAKBANK', 'ITC', 'LT', 'AXISBANK', 'ASIANPAINT', 'MARUTI',
   'SUNPHARMA', 'HCLTECH', 'TITAN', 'ULTRACEMCO', 'WIPRO', 'TATASTEEL'
 ];
@@ -17,28 +18,39 @@ let onTickCallback = null;
 let mockInterval = null;
 
 const universe = [
-  ...mockFnoSymbols.map(sym => ({
-    instrument_key: `NSE_EQ|${sym}`,
+  ...mockFnoSymbols.map((sym, idx) => ({
+    instrument_key: String(1000 + idx),
     tradingsymbol: sym,
     name: sym,
-    type: 'STOCK'
+    type: 'STOCK',
+    exchange: 'NSE',
+    exchangeType: 1,
+    lotsize: 250,
+    segment: 'NSE_EQ',
+    cashToken: String(1000 + idx)
   })),
-  ...mockIndices.map(sym => ({
-    instrument_key: `NSE_INDEX|${sym}`,
+  ...mockIndices.map((sym, idx) => ({
+    instrument_key: String(2000 + idx),
     tradingsymbol: sym,
     name: sym,
-    type: 'INDEX'
+    type: 'INDEX',
+    exchange: 'NSE',
+    exchangeType: 1,
+    lotsize: 1,
+    segment: 'NSE_EQ'
   }))
 ];
 
-// Initial mock data
+// Initial mock base prices
 const mockData = {};
 universe.forEach(inst => {
   const isIndex = inst.type === 'INDEX';
-  const basePrice = isIndex ? 20000 + Math.random() * 5000 : 100 + Math.random() * 3000;
+  const basePrice = isIndex ? 20000 + Math.random() * 5000 : 200 + Math.random() * 2800;
   mockData[inst.instrument_key] = {
-    close: basePrice,
-    ltp: basePrice + (Math.random() - 0.5) * (basePrice * 0.05) // +/- 2.5%
+    close: Math.round(basePrice * 100) / 100,
+    ltp: Math.round(basePrice * (1 + (Math.random() - 0.5) * 0.04) * 100) / 100,
+    oi: 500000 + Math.floor(Math.random() * 2000000),
+    previousOi: 500000 + Math.floor(Math.random() * 2000000)
   };
 });
 
@@ -48,96 +60,182 @@ module.exports = {
     return true;
   },
 
+  reconnect: async () => {
+    logger.info('Mock Data Source reconnected');
+    return true;
+  },
+
   getFnoUniverse: async () => {
+    return universe.filter(u => u.type === 'STOCK');
+  },
+
+  getCashUniverse: async () => {
+    return universe.filter(u => u.type === 'STOCK');
+  },
+
+  getUniverse: async (segment = 'BOTH') => {
     return universe;
+  },
+
+  getIndices: () => {
+    return universe.filter(u => u.type === 'INDEX');
   },
 
   getPrevDayHL: async (universeList) => {
     const pdhData = {};
+    const lastTradingDay = marketSession.getLastCompletedTradingDay();
+
     universeList.forEach(inst => {
       const data = mockData[inst.instrument_key];
       if (data) {
-        // PDH is slightly lower than open for gainers so they pass the rule
         pdhData[inst.instrument_key] = {
-          high: data.close * 1.01,
-          low: data.close * 0.99
+          high: Math.round(data.close * 1.015 * 100) / 100,
+          low: Math.round(data.close * 0.985 * 100) / 100,
+          close: data.close,
+          date: lastTradingDay
         };
       }
     });
     return pdhData;
   },
 
+  getPrevMonthHL: async (universeList) => {
+    const pmhData = {};
+    const prevMonth = marketSession.getPreviousCompletedMonth();
+
+    universeList.forEach(inst => {
+      const data = mockData[inst.instrument_key];
+      if (data) {
+        pmhData[inst.instrument_key] = {
+          high: Math.round(data.close * 1.05 * 100) / 100,
+          low: Math.round(data.close * 0.92 * 100) / 100,
+          month: prevMonth.label
+        };
+      }
+    });
+    return pmhData;
+  },
+
+  getLastDaySnapshot: async (universeList) => {
+    const lastTradingDay = marketSession.getLastCompletedTradingDay();
+    const snapshot = [];
+
+    universeList.forEach((inst, index) => {
+      const data = mockData[inst.instrument_key];
+      if (!data) return;
+
+      const pdh = Math.round(data.close * 1.01 * 100) / 100;
+      const pdl = Math.round(data.close * 0.99 * 100) / 100;
+
+      let ltp, open, oiChangePct;
+      if (index < 5) {
+        // Guaranteed gainer
+        open = pdh * 1.005;
+        ltp = open * 1.02;
+        oiChangePct = 7.5;
+      } else if (index < 10) {
+        // Guaranteed loser
+        open = pdl * 0.995;
+        ltp = open * 0.98;
+        oiChangePct = 6.2;
+      } else {
+        open = data.close;
+        ltp = data.ltp;
+        oiChangePct = ((data.oi - data.previousOi) / data.previousOi) * 100;
+      }
+
+      snapshot.push({
+        instrument_key: inst.instrument_key,
+        ltp: Math.round(ltp * 100) / 100,
+        close: data.close,
+        open: Math.round(open * 100) / 100,
+        high: Math.round(Math.max(ltp, open, pdh) * 100) / 100,
+        low: Math.round(Math.min(ltp, open, pdl) * 100) / 100,
+        volume: 250000 + Math.floor(Math.random() * 500000),
+        oi: data.oi,
+        previousOi: data.previousOi,
+        oi_change_pct: Math.round(oiChangePct * 100) / 100,
+        prevHigh: pdh,
+        prevLow: pdl,
+        sessionDate: lastTradingDay
+      });
+    });
+
+    return snapshot;
+  },
+
   subscribeLive: (onTick) => {
     onTickCallback = onTick;
-    
+
     // Initial push
     const initialTicks = universe.map((inst, index) => {
       const data = mockData[inst.instrument_key];
-      
       const pdh = data.close * 1.01;
       const pdl = data.close * 0.99;
-      
-      // Force first 5 stocks to be guaranteed Gainers (Open > PDH, PC > 1%, OI > 5%)
-      // Force next 5 stocks to be guaranteed Losers (Open < PDL, PC < -1%, OI > 5%)
-      let mockOpen, mockLtp, mockOi;
-      
+
+      let mockOpen, mockLtp, mockOiPct;
+
       if (index < 5) {
-        mockOpen = pdh * 1.005; // Open above PDH
-        mockLtp = mockOpen * 1.015; // Positive price change
-        mockOi = 6.0 + Math.random() * 5; // OI > 5%
+        mockOpen = pdh * 1.005;
+        mockLtp = mockOpen * 1.02;
+        mockOiPct = 6.0 + Math.random() * 4;
       } else if (index < 10) {
-        mockOpen = pdl * 0.995; // Open below PDL
-        mockLtp = mockOpen * 0.985; // Negative price change
-        mockOi = 6.0 + Math.random() * 5; // OI > 5%
+        mockOpen = pdl * 0.995;
+        mockLtp = mockOpen * 0.98;
+        mockOiPct = 6.0 + Math.random() * 4;
       } else {
-        const isOpenAbovePdh = Math.random() > 0.5;
-        mockOpen = isOpenAbovePdh ? pdh * 1.005 : pdl * 0.995;
+        const isUp = Math.random() > 0.5;
+        mockOpen = isUp ? pdh * 1.002 : pdl * 0.998;
         mockLtp = data.ltp;
-        mockOi = (Math.random() * 20) - 5;
+        mockOiPct = (Math.random() * 16) - 6;
       }
-      
-      // Keep track of the current forced LTPs for the interval updates
+
       data.ltp = mockLtp;
-      
+
       return {
         instrument_key: inst.instrument_key,
-        ltp: mockLtp,
+        ltp: Math.round(mockLtp * 100) / 100,
         close: data.close,
-        open: mockOpen,
-        oi_change_pct: mockOi,
+        open: Math.round(mockOpen * 100) / 100,
+        oi: data.oi,
+        previousOi: data.previousOi,
+        oi_change_pct: Math.round(mockOiPct * 100) / 100,
         volume: Math.floor(Math.random() * 1000000)
       };
     });
+
     onTick(initialTicks);
 
-    // Simulate live updates
+    // Simulate tick updates
     if (mockInterval) clearInterval(mockInterval);
-    
+
     mockInterval = setInterval(() => {
       const updates = [];
-      for (let i = 0; i < 2; i++) {
+      for (let i = 0; i < 3; i++) {
         const idx = Math.floor(Math.random() * universe.length);
         const inst = universe[idx];
         const data = mockData[inst.instrument_key];
-        
-        // Random walk: +/- 0.1%
+
         const change = data.ltp * (Math.random() - 0.5) * 0.002;
-        data.ltp += change;
-        
-        let mockOi = (Math.random() * 20) - 5;
-        if (idx < 10) mockOi = 6.0 + Math.random() * 5; // Keep the forced ones above 5% OI
-        
+        data.ltp = Math.round((data.ltp + change) * 100) / 100;
+
+        let mockOiPct = (Math.random() * 16) - 6;
+        if (idx < 5 || (idx >= 5 && idx < 10)) {
+          mockOiPct = 6.5 + Math.random() * 3;
+        }
+
         updates.push({
           instrument_key: inst.instrument_key,
           ltp: data.ltp,
-          oi_change_pct: mockOi,
+          close: data.close,
+          oi_change_pct: Math.round(mockOiPct * 100) / 100,
           volume: Math.floor(Math.random() * 10000)
         });
       }
-      
+
       if (onTickCallback) {
         onTickCallback(updates);
       }
-    }, 3000); // 3 updates per second
+    }, 2000);
   }
 };

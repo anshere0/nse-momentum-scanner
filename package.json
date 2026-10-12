@@ -1,7 +1,7 @@
 {
   "name": "fo-momentum-scanner",
   "version": "1.0.0",
-  "description": "F&O Momentum Scanner - Live Top 10 Gainers/Losers for F&O stocks via Upstox API",
+  "description": "NSE Market Scanner - Live F&O Momentum, PDH/PDL Breakouts, OI Dynamics & Breadth via Angel One SmartAPI",
   "main": "server/index.js",
   "scripts": {
     "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
@@ -9,13 +9,14 @@
     "client:dev": "cd client && npm run dev",
     "build": "cd client && npm run build",
     "start": "node server/index.js",
-    "test": "node --test server/tests/filter.test.js"
+    "test": "node --test server/tests/*.test.js"
   },
   "keywords": [
     "fno",
     "momentum",
     "scanner",
-    "upstox",
+    "angelone",
+    "smartapi",
     "nse"
   ],
   "author": "",
@@ -25,12 +26,11 @@
     "concurrently": "^10.0.6",
     "cors": "^2.8.6",
     "csv-parser": "^3.2.1",
-    "dhanhq": "^1.0.6",
     "dotenv": "^18.0.7",
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.1",
     "helmet": "^8.3.0",
-    "protobufjs": "^8.8.0",
+    "otplib": "^13.5.0",
     "ws": "^8.22.0",
     "yahoo-finance2": "^4.0.3"
   }

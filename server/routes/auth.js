@@ -1,87 +1,123 @@
 const express = require('express');
-const axios = require('axios');
+const angelAuth = require('../services/angeloneAuth');
+const angelone = require('../dataSource/angelone');
 const tokenStore = require('../utils/tokenStore');
+const marketSession = require('../services/marketSession');
 const logger = require('../utils/logger');
 
 const authRoutes = express.Router();
 const adminRoutes = express.Router();
 
-const API_BASE = 'https://api.upstox.com/v2';
-
-// Get Auth URL
-adminRoutes.get('/login-url', (req, res) => {
-  const apiKey = process.env.UPSTOX_API_KEY;
-  const redirectUri = process.env.UPSTOX_REDIRECT_URI;
-  if (!apiKey || !redirectUri) {
-    return res.status(500).json({ error: 'API Key or Redirect URI not configured in .env' });
-  }
-  
-  const url = `${API_BASE}/login/authorization/dialog?response_type=code&client_id=${apiKey}&redirect_uri=${redirectUri}`;
-  res.json({ url });
-});
-
-// Admin status
-adminRoutes.get('/status', (req, res) => {
+/**
+ * GET /admin/status or /auth/status
+ * Returns connection and authentication status without exposing credentials
+ */
+function getStatusHandler(req, res) {
   const tokenData = tokenStore.load();
-  res.json({
-    hasToken: !!tokenData,
-    tokenExpires: tokenData ? new Date(tokenData.expiresAt).toISOString() : null,
-    dataSource: process.env.DATA_SOURCE
-  });
-});
+  const credentialsConfigured = !!(
+    process.env.ANGEL_API_KEY &&
+    process.env.ANGEL_CLIENT_CODE &&
+    process.env.ANGEL_PIN &&
+    process.env.ANGEL_TOTP_SECRET
+  );
 
-// Public callback for Upstox OAuth
-authRoutes.get('/callback', async (req, res) => {
-  const { code } = req.query;
-  
-  if (!code) {
-    return res.status(400).send('Authorization code missing');
+  const marketStatus = marketSession.getMarketStatus();
+
+  res.json({
+    dataSource: process.env.DATA_SOURCE || 'mock',
+    credentialsConfigured,
+    hasToken: !!tokenData?.jwtToken,
+    tokenExpires: tokenData?.expiresAt ? new Date(tokenData.expiresAt).toISOString() : null,
+    clientCode: tokenData?.clientCode ? `${tokenData.clientCode.substring(0, 2)}***` : null,
+    market: marketStatus
+  });
+}
+
+adminRoutes.get('/status', getStatusHandler);
+authRoutes.get('/status', getStatusHandler);
+
+/**
+ * POST /admin/connect or POST /auth/connect
+ * Triggers authentication with Angel One using configured env or provided credentials
+ */
+async function handleConnect(req, res) {
+  const apiKey = req.body?.apiKey || process.env.ANGEL_API_KEY;
+  const clientCode = req.body?.clientCode || process.env.ANGEL_CLIENT_CODE;
+  const pin = req.body?.pin || process.env.ANGEL_PIN;
+  const totpSecret = req.body?.totpSecret || process.env.ANGEL_TOTP_SECRET;
+
+  if (!apiKey || !clientCode || !pin || !totpSecret) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing required credentials (API Key, Client Code, PIN, TOTP Secret)'
+    });
   }
 
   try {
-    const response = await axios.post(`${API_BASE}/login/authorization/token`, new URLSearchParams({
-      code,
-      client_id: process.env.UPSTOX_API_KEY,
-      client_secret: process.env.UPSTOX_API_SECRET,
-      redirect_uri: process.env.UPSTOX_REDIRECT_URI,
-      grant_type: 'authorization_code'
-    }).toString(), {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json'
-      }
+    const authResult = await angelAuth.login(apiKey, clientCode, pin, totpSecret);
+    tokenStore.save({
+      jwtToken: authResult.jwtToken,
+      refreshToken: authResult.refreshToken,
+      feedToken: authResult.feedToken,
+      clientCode: authResult.clientCode,
+      expiresAt: authResult.expiresAt,
+      loginTime: authResult.loginTime
     });
 
-    const data = response.data;
-    if (data && data.access_token) {
-      // Upstox token is valid for 1 day usually, assuming 24h if not provided
-      // No expires_in field in some docs, assuming 24h
-      const expiresAt = Date.now() + (24 * 60 * 60 * 1000); 
-      
-      tokenStore.save({
-        accessToken: data.access_token,
-        expiresAt
-      });
-      
-      logger.info('OAuth successful, token saved');
-      res.send(`
-        <html>
-          <body style="font-family: sans-serif; text-align: center; margin-top: 50px;">
-            <h2>Upstox Authorization Successful!</h2>
-            <p>You can close this tab and return to the application.</p>
-            <script>setTimeout(() => window.close(), 3000);</script>
-          </body>
-        </html>
-      `);
-      
-      // Need to restart connection
-      logger.info('Please restart server to apply new token and connect to feed.');
-    } else {
-      res.status(500).send('Invalid token response from Upstox');
+    // Also trigger reconnect in angelone data source if loaded
+    try {
+      await angelone.reconnect();
+    } catch (e) {
+      logger.warn('AngelOne data source reconnect trigger:', e.message);
     }
+
+    res.json({
+      success: true,
+      message: 'Successfully connected to Angel One SmartAPI',
+      tokenExpires: new Date(authResult.expiresAt).toISOString()
+    });
   } catch (err) {
-    logger.error('OAuth Callback Error:', err.response ? err.response.data : err.message);
-    res.status(500).send(`Error during authorization: ${err.response ? JSON.stringify(err.response.data) : err.message}`);
+    logger.error('Connect failed:', err.message);
+    res.status(500).json({
+      success: false,
+      error: err.message || 'Failed to connect to Angel One SmartAPI'
+    });
+  }
+}
+
+adminRoutes.post('/connect', handleConnect);
+authRoutes.post('/connect', handleConnect);
+
+/**
+ * POST /admin/reconnect
+ * Reconnects using current credentials or cached refresh token
+ */
+adminRoutes.post('/reconnect', async (req, res) => {
+  try {
+    await angelone.reconnect();
+    res.json({ success: true, message: 'Reconnected successfully' });
+  } catch (err) {
+    logger.error('Reconnect failed:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /admin/logout
+ * Logs out and clears local session tokens
+ */
+adminRoutes.post('/logout', async (req, res) => {
+  try {
+    const tokenData = tokenStore.load();
+    if (tokenData && process.env.ANGEL_API_KEY) {
+      await angelAuth.logout(process.env.ANGEL_API_KEY, tokenData.clientCode, tokenData.jwtToken);
+    }
+    tokenStore.clear();
+    res.json({ success: true, message: 'Logged out successfully' });
+  } catch (err) {
+    logger.error('Logout error:', err.message);
+    tokenStore.clear();
+    res.json({ success: true, message: 'Logged out locally' });
   }
 });
 

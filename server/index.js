@@ -6,17 +6,18 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const { getDataSource } = require('./dataSource');
 const authRoutes = require('./routes/auth');
-const apiRoutes = require('./routes/api');
+const { apiRoutes, setDataSource } = require('./routes/api');
 const sseRoutes = require('./routes/sse');
 const tokenStore = require('./utils/tokenStore');
 const marketState = require('./state/marketState');
+const marketSession = require('./services/marketSession');
 const pdhCache = require('./utils/pdhCache');
 const logger = require('./utils/logger');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Security
+// Security Middleware
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -25,13 +26,28 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'"],
+      connectSrc: ["'self'", "*", "https://*.loca.lt", "wss://*.loca.lt", "https://*.angelone.in", "wss://*.angelone.in"],
+      upgradeInsecureRequests: null,
     }
-  }
+  },
+  hsts: false,
 }));
 
-const allowedOrigins = process.env.PUBLIC_BASE_URL ? [process.env.PUBLIC_BASE_URL] : ['http://localhost:3000', 'http://localhost:5173'];
-app.use(cors({ origin: allowedOrigins }));
+const defaultOrigins = ['http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000', 'http://127.0.0.1:5173'];
+const allowedOrigins = process.env.PUBLIC_BASE_URL
+  ? [process.env.PUBLIC_BASE_URL, ...defaultOrigins]
+  : defaultOrigins;
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin) || origin.endsWith('.loca.lt') || origin.includes('localhost')) {
+      return callback(null, true);
+    }
+    return callback(null, true);
+  },
+  credentials: true
+}));
 
 // Rate limiting
 const limiter = rateLimit({
@@ -51,101 +67,141 @@ app.use('/auth', authRoutes.authRoutes);
 app.use('/api', apiRoutes);
 app.use('/sse', sseRoutes);
 
-// Serve static React build
+// Serve static React client build
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
 app.use(express.static(clientDist));
 app.use((req, res) => {
   const indexPath = path.join(clientDist, 'index.html');
   res.sendFile(indexPath, (err) => {
     if (err) {
-      res.status(200).send('F&O Momentum Scanner - Client not built yet. Run: npm run build');
+      res.status(200).send('F&O Momentum Scanner - Client build ready or running via Vite');
     }
   });
 });
 
-// === Startup ===
+// Startup Flow
 async function startApp() {
-  logger.info('=== F&O Momentum Scanner Starting ===');
-  
+  logger.info('=== Indian Stock Market Scanner (Angel One SmartAPI) Starting ===');
+
   // Ensure data dir exists
   const fs = require('fs');
   const dataDir = path.join(__dirname, '..', 'data');
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
-  // Load saved token
-  const savedToken = tokenStore.load();
-  if (savedToken) {
-    logger.info(`Loaded saved token (expires: ${new Date(savedToken.expiresAt).toISOString()})`);
-  }
-
-  // Get the data source (upstox or mock)
-  const sourceName = process.env.DATA_SOURCE || 'mock';
+  // Get data source
+  const sourceName = process.env.DATA_SOURCE || 'angelone';
   const dataSource = getDataSource(sourceName);
-  logger.info(`Data source: ${sourceName}`);
+  setDataSource(dataSource);
+  logger.info(`Data source selected: ${sourceName}`);
+
+  // Market session check
+  const marketStatus = marketSession.getMarketStatus();
+  const lastTradingDay = marketSession.getLastCompletedTradingDay();
+  logger.info(`Market Status: ${marketStatus.sessionType} (Market Open: ${marketStatus.isMarketOpen})`);
+  logger.info(`Last Completed Trading Session: ${lastTradingDay}`);
 
   try {
-    // Initialize data source
+    // Initialize data source (auth + instrument master)
     await dataSource.init();
-    
-    // Get F&O universe
+
+    // Load Universe
     const fnoUniverse = await dataSource.getFnoUniverse();
-    logger.info(`F&O Universe loaded: ${fnoUniverse.length} stocks`);
+    logger.info(`Loaded F&O Universe: ${fnoUniverse.length} instruments`);
     marketState.setUniverse(fnoUniverse);
 
-    // Load PDH/PDL data
-    const pdhData = await dataSource.getPrevDayHL(fnoUniverse);
-    logger.info(`PDH/PDL data loaded for ${Object.keys(pdhData).length} symbols`);
-    marketState.setPdhData(pdhData);
-    pdhCache.save(pdhData);
+    let cashUniverse = [];
+    if (dataSource.getCashUniverse) {
+      cashUniverse = await dataSource.getCashUniverse(true);
+      marketState.setCashUniverse(cashUniverse);
+      logger.info(`Loaded Cash Universe: ${cashUniverse.length} instruments`);
+    }
 
-    // Subscribe to live data
+    const fullUniverse = [...fnoUniverse, ...cashUniverse];
+
+    // Load PDH / PDL data
+    try {
+      const pdhData = await dataSource.getPrevDayHL(fnoUniverse);
+      logger.info(`PDH/PDL data loaded for ${Object.keys(pdhData).length} instruments`);
+      marketState.setPdhData(pdhData);
+      pdhCache.save(pdhData);
+    } catch (pdhErr) {
+      logger.warn('Could not load PDH/PDL data:', pdhErr.message);
+    }
+
+    // Load PMH / PML asynchronously in background so startup is instant
+    if (dataSource.getPrevMonthHL) {
+      dataSource.getPrevMonthHL(fnoUniverse).then(pmhData => {
+        marketState.setPmhData(pmhData);
+        logger.info(`PMH/PML data loaded for ${Object.keys(pmhData).length} instruments`);
+      }).catch(pmhErr => {
+        logger.warn('Could not load PMH/PML data:', pmhErr.message);
+      });
+    }
+
+    // Check if market is closed — if so, load the last completed trading day's snapshot!
+    if (!marketStatus.isMarketOpen && dataSource.getLastDaySnapshot) {
+      logger.info(`Market is closed. Loading last trading day snapshot (${lastTradingDay})...`);
+      try {
+        const snapshot = await dataSource.getLastDaySnapshot(fullUniverse);
+        if (snapshot && snapshot.length > 0) {
+          marketState.updateTicks(snapshot);
+          marketState.setDataMode('PREVIOUS_CLOSE', lastTradingDay);
+          logger.info(`Successfully loaded previous close data for ${snapshot.length} instruments`);
+        } else {
+          marketState.setDataMode('UNAVAILABLE');
+        }
+      } catch (snapErr) {
+        logger.warn('Could not load last day snapshot:', snapErr.message);
+        marketState.setDataMode('UNAVAILABLE');
+      }
+    } else if (marketStatus.isMarketOpen) {
+      marketState.setDataMode('LIVE', marketStatus.currentDate);
+    }
+
+    // Subscribe to live feed
     dataSource.subscribeLive((ticks) => {
       marketState.updateTicks(ticks);
+      const currentStatus = marketSession.getMarketStatus();
+      if (currentStatus.isMarketOpen) {
+        marketState.setDataMode('LIVE', currentStatus.currentDate);
+      }
     });
 
-    // If market is closed, load last trading day's data so the dashboard isn't empty
-    if (dataSource.getLastDaySnapshot) {
-      const now = new Date();
-      const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-      const hours = ist.getHours();
-      const minutes = ist.getMinutes();
-      const day = ist.getDay();
-      const timeInMinutes = hours * 60 + minutes;
-      const isMarketOpen = day > 0 && day < 6 && timeInMinutes >= 540 && timeInMinutes <= 930;
-
-      if (!isMarketOpen) {
-        logger.info('Market is closed — loading last trading day snapshot...');
-        try {
-          const snapshot = await dataSource.getLastDaySnapshot(fnoUniverse);
-          if (snapshot.length > 0) {
-            // Feed the historical ticks into marketState so it shows data
-            marketState.updateTicks(snapshot);
-            logger.info(`Loaded ${snapshot.length} symbols from last trading day`);
-          }
-        } catch (snapErr) {
-          logger.warn('Could not load last day snapshot:', snapErr.message);
-        }
-      }
-    }
+    marketState.setConnectionStatus('CONNECTED');
+    marketState.setScanning(true);
 
     // Start SSE broadcast (1 per second)
     startBroadcast();
-
-    logger.info('Data source initialized successfully');
+    logger.info('Data source initialized and broadcast started successfully');
   } catch (err) {
-    logger.error('Failed to initialize data source:', err.message);
-    logger.info('Server will start but show stale/empty data. Admin login may be required.');
+    logger.error('Failed to fully initialize data source:', err.message);
+    marketState.setConnectionStatus('ERROR');
+    marketState.setDataMode('UNAVAILABLE');
+    startBroadcast();
   }
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     logger.info(`Server running on port ${PORT}`);
     logger.info(`Dashboard: ${process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`}`);
   });
+
+  // Graceful shutdown
+  const shutdown = async () => {
+    logger.info('Shutting down gracefully...');
+    server.close();
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 // SSE broadcast interval
 function startBroadcast() {
   setInterval(() => {
+    const currentStatus = marketSession.getMarketStatus();
+    if (currentStatus.isMarketOpen && marketState.dataMode !== 'LIVE') {
+      marketState.setDataMode('LIVE', currentStatus.currentDate);
+    }
     const snapshot = marketState.getSnapshot();
     sseRoutes.broadcast(snapshot);
   }, 1000);

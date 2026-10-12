@@ -1,14 +1,12 @@
-const upstox = require('./upstox');
+const angelone = require('./angelone');
 const mock = require('./mock');
-const dhan = require('./dhan');
 const logger = require('../utils/logger');
 
 function getDataSource(type = 'mock') {
-  if (type.toLowerCase() === 'upstox') {
-    return upstox;
-  }
-  if (type.toLowerCase() === 'dhan') {
-    return dhan;
+  const t = type.toLowerCase();
+  
+  if (t === 'angelone' || t === 'angel') {
+    return angelone;
   }
   
   logger.info('Using mock data source');
