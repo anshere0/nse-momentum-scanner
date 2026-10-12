@@ -56,17 +56,17 @@ const NSE_HOLIDAYS = new Set([
  * Get current time in IST (accepts optional refDate for deterministic testing)
  */
 function getNowIST(refDate = null) {
-  const now = refDate ? new Date(refDate) : new Date();
-  const utcMs = now.getTime() + (now.getTimezoneOffset() * 60 * 1000);
-  return new Date(utcMs + IST_OFFSET_MS);
+  const d = refDate ? new Date(refDate) : new Date();
+  const istStr = d.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+  return new Date(istStr);
 }
 
 /**
  * Convert a Date object to IST
  */
 function toIST(date) {
-  const utcMs = date.getTime() + (date.getTimezoneOffset() * 60 * 1000);
-  return new Date(utcMs + IST_OFFSET_MS);
+  const istStr = date.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+  return new Date(istStr);
 }
 
 /**
@@ -91,8 +91,8 @@ function formatDateDisplay(date) {
  * Check if a date (YYYY-MM-DD) is a weekend
  */
 function isWeekend(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00+05:30');
-  const day = d.getDay();
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const day = new Date(Date.UTC(y, m - 1, d, 12, 0, 0)).getUTCDay();
   return day === 0 || day === 6;
 }
 
@@ -272,11 +272,14 @@ function getMarketStatus(refDate = null) {
     todayDate: todayStr,
     todayDisplay: formatDateDisplay(ist),
     lastTradingDay,
-    lastTradingDayDisplay: formatDateDisplay(new Date(lastTradingDay + 'T00:00:00+05:30')),
+    lastTradingDayDisplay: (() => {
+      const [ly, lm, ld] = lastTradingDay.split('-').map(Number);
+      return formatDateDisplay(new Date(ly, lm - 1, ld));
+    })(),
     isTradingDay: isTradingDay(todayStr),
     isMarketOpen: sessionType === 'REGULAR',
     isPreOpen: sessionType === 'PRE_OPEN',
-    currentTimeIST: ist.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }),
+    currentTimeIST: (refDate ? new Date(refDate) : new Date()).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true }),
     timestamp: Date.now()
   };
 }
@@ -286,7 +289,8 @@ function getMarketStatus(refDate = null) {
  */
 function getPreviousTradingDays(fromDateStr, count = 5) {
   const result = [];
-  let checkDate = new Date(fromDateStr + 'T00:00:00+05:30');
+  const [fy, fm, fd] = fromDateStr.split('-').map(Number);
+  let checkDate = new Date(fy, fm - 1, fd);
 
   for (let i = 0; i < 30 && result.length < count; i++) {
     checkDate.setDate(checkDate.getDate() - 1);
