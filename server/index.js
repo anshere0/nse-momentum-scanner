@@ -167,7 +167,7 @@ async function startApp() {
         marketState.setDataMode('UNAVAILABLE');
       }
     } else if (marketStatus.isMarketOpen) {
-      marketState.setDataMode('LIVE', marketStatus.currentDate);
+      marketState.setDataMode('LIVE', marketStatus.todayDate);
     }
 
     // Subscribe to live feed
@@ -175,7 +175,7 @@ async function startApp() {
       marketState.updateTicks(ticks);
       const currentStatus = marketSession.getMarketStatus();
       if (currentStatus.isMarketOpen) {
-        marketState.setDataMode('LIVE', currentStatus.currentDate);
+        marketState.setDataMode('LIVE', currentStatus.todayDate);
       }
     });
 

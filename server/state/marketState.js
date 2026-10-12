@@ -201,11 +201,15 @@ class MarketState {
     if (sessionDate) {
       this.sessionDate = sessionDate;
       try {
-        const d = new Date(sessionDate + 'T00:00:00+05:30');
-        this.sessionDateDisplay = marketSession.formatDateDisplay(d);
+        const [y, m, d] = sessionDate.split('-').map(Number);
+        this.sessionDateDisplay = marketSession.formatDateDisplay(new Date(y, m - 1, d));
       } catch {
         this.sessionDateDisplay = sessionDate;
       }
+    } else if (mode === 'LIVE') {
+      const ms = marketSession.getMarketStatus();
+      this.sessionDate = ms.todayDate;
+      this.sessionDateDisplay = ms.todayDisplay;
     }
   }
 
@@ -600,8 +604,8 @@ class MarketState {
       status: {
         connection: this.connectionStatus,
         dataMode: this.dataMode,
-        sessionDate: this.sessionDate,
-        sessionDateDisplay: this.sessionDateDisplay,
+        sessionDate: this.dataMode === 'LIVE' ? ms.todayDate : this.sessionDate,
+        sessionDateDisplay: this.dataMode === 'LIVE' ? ms.todayDisplay : this.sessionDateDisplay,
         lastUpdated: this.lastUpdated,
         isScanning: this.isScanning,
         tickCount: this.tickCount,
