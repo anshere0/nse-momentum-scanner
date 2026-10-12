@@ -179,6 +179,15 @@ class MarketState {
     }
   }
 
+  setOiRefMap(refMap) {
+    if (!refMap) return;
+    for (const [key, val] of Object.entries(refMap)) {
+      if (val && Number(val) > 0) {
+        this.oiRefMap[key] = Number(val);
+      }
+    }
+  }
+
   setPmhData(pmhData) {
     this.pmhData = pmhData;
   }
@@ -245,14 +254,21 @@ class MarketState {
       }
 
       if (tick.oi !== undefined && tick.oi > 0) {
-        const prevOi = this.oiRefMap[instrument_key];
         this.oiMap[instrument_key] = tick.oi;
 
+        let prevOi = this.oiRefMap[instrument_key] ||
+                     (tick.name && this.oiRefMap[tick.name]) ||
+                     (tick.tradingsymbol && this.oiRefMap[tick.tradingsymbol]);
+
         // Calculate OI change % if we have a valid previous reference
-        if (prevOi && prevOi > 0 && prevOi !== tick.oi) {
+        if (prevOi && prevOi > 0) {
           this.oiChangeMap[instrument_key] = ((tick.oi - prevOi) / prevOi) * 100;
-        } else if (this.oiChangeMap[instrument_key] === undefined) {
-          this.oiChangeMap[instrument_key] = 0;
+        } else {
+          // Record first seen tick OI as baseline for subsequent intraday changes
+          this.oiRefMap[instrument_key] = tick.oi;
+          if (this.oiChangeMap[instrument_key] === undefined) {
+            this.oiChangeMap[instrument_key] = 0;
+          }
         }
       }
 

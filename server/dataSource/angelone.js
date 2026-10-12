@@ -651,13 +651,13 @@ function subscribeToInstruments() {
     correlationID: 'scanner_sub_' + Date.now(),
     action: 1, // Subscribe
     params: {
-      mode: 2, // Quote mode: LTP + OHLCV
+      mode: 3, // Snap Quote mode: LTP + OHLCV + Open Interest
       tokenList
     }
   });
 
   ws.send(subscriptionMessage);
-  logger.info(`WebSocket subscription sent for ${universeList.length} instruments`);
+  logger.info(`WebSocket subscription sent (Snap Quote Mode 3) for ${universeList.length} instruments`);
 }
 
 /**
@@ -795,9 +795,12 @@ async function pollQuotes() {
         const original = quoteInstruments.find(q => q.instrument_key === r.symbolToken);
         const key = original ? original.originalKey : r.symbolToken;
         const isFno = original ? original.isFno : (r.exchange === 'NFO');
+        const matched = universeList.find(u => u.instrument_key === key);
 
         return {
           instrument_key: key,
+          tradingsymbol: matched?.tradingsymbol || r.tradingSymbol,
+          name: matched?.underlying || matched?.name,
           ltp: parseFloat(r.ltp) || 0,
           close: parseFloat(r.close) || 0,
           open: parseFloat(r.open) || 0,

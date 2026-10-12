@@ -118,14 +118,26 @@ async function startApp() {
 
     const fullUniverse = [...fnoUniverse, ...cashUniverse];
 
-    // Load PDH / PDL data
+    // Load Baseline OI reference and PDH/PDL from official NSE Bhavcopy
     try {
-      const pdhData = await dataSource.getPrevDayHL(fnoUniverse);
-      logger.info(`PDH/PDL data loaded for ${Object.keys(pdhData).length} instruments`);
-      marketState.setPdhData(pdhData);
-      pdhCache.save(pdhData);
-    } catch (pdhErr) {
-      logger.warn('Could not load PDH/PDL data:', pdhErr.message);
+      const bhavcopyService = require('./services/bhavcopyService');
+      const bhavData = await bhavcopyService.fetchFoBhavcopy(lastTradingDay, fnoUniverse);
+      if (bhavData && bhavData.oiMap && Object.keys(bhavData.oiMap).length > 0) {
+        marketState.setOiRefMap(bhavData.oiMap);
+        logger.info(`OI reference baseline loaded for ${Object.keys(bhavData.oiMap).length} instruments from NSE Bhavcopy`);
+      }
+      if (bhavData && bhavData.pdhMap && Object.keys(bhavData.pdhMap).length > 0) {
+        marketState.setPdhData(bhavData.pdhMap);
+        pdhCache.save(bhavData.pdhMap);
+        logger.info(`PDH/PDL reference loaded for ${Object.keys(bhavData.pdhMap).length} instruments from NSE Bhavcopy`);
+      }
+    } catch (bhavErr) {
+      logger.warn('Could not load Bhavcopy baseline:', bhavErr.message);
+      // Fallback to data source PDH if available
+      try {
+        const pdhData = await dataSource.getPrevDayHL(fnoUniverse);
+        marketState.setPdhData(pdhData);
+      } catch {}
     }
 
     // Load PMH / PML asynchronously in background so startup is instant
