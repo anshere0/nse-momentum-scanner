@@ -213,12 +213,13 @@ async function getMarketQuotes(instruments, mode = 'FULL') {
   return allResults;
 }
 
+let historicalApiSupported = true;
+
 /**
  * Fetch historical candle data
  */
 async function getHistoricalCandles(symboltoken, exchange, interval, fromdate, todate) {
-  if (!authData) {
-    logger.warn('Cannot fetch historical data: not authenticated');
+  if (!authData || !historicalApiSupported) {
     return [];
   }
 
@@ -241,8 +242,14 @@ async function getHistoricalCandles(symboltoken, exchange, interval, fromdate, t
   } catch (err) {
     if (err.response?.status === 401) {
       connectionStatus = 'SESSION_EXPIRED';
+    } else if (err.response?.status === 403) {
+      if (historicalApiSupported) {
+        logger.info('Angel One Historical API requires separate add-on subscription (HTTP 403). Skipping historical candle queries.');
+        historicalApiSupported = false;
+      }
+    } else {
+      logger.error(`Historical fetch error (${symboltoken}):`, err.response?.data?.message || err.message);
     }
-    logger.error(`Historical fetch error (${symboltoken}):`, err.response?.data?.message || err.message);
     return [];
   }
 }
@@ -339,6 +346,9 @@ async function getPrevMonthHL(universeListParam) {
   const stocks = universeListParam.filter(u => u.type === 'STOCK');
 
   for (let i = 0; i < stocks.length; i++) {
+    if (!historicalApiSupported) {
+      break;
+    }
     const u = stocks[i];
     try {
       const token = u.cashToken || u.instrument_key;
