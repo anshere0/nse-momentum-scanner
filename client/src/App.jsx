@@ -42,8 +42,13 @@ function App() {
   // SSE connection
   useEffect(() => {
     let evtSource = null;
+    let reconnectTimeout = null;
 
     const connectSSE = () => {
+      if (evtSource) {
+        evtSource.close();
+      }
+
       evtSource = new EventSource(`${API_URL}/sse/live`);
 
       evtSource.onopen = () => {
@@ -52,6 +57,7 @@ function App() {
 
       evtSource.onmessage = (event) => {
         try {
+          if (!event.data || event.data.startsWith(':')) return;
           const parsed = JSON.parse(event.data);
           setData(parsed);
           setConnected(true);
@@ -65,15 +71,19 @@ function App() {
 
       evtSource.onerror = () => {
         setConnected(false);
-        evtSource.close();
-        // Reconnect after 3 seconds
-        setTimeout(connectSSE, 3000);
+        // Only force recreate if connection is completely CLOSED
+        if (evtSource.readyState === EventSource.CLOSED) {
+          evtSource.close();
+          if (reconnectTimeout) clearTimeout(reconnectTimeout);
+          reconnectTimeout = setTimeout(connectSSE, 3000);
+        }
       };
     };
 
     connectSSE();
 
     return () => {
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (evtSource) evtSource.close();
     };
   }, []);

@@ -9,18 +9,39 @@ sseRoutes.get('/live', (req, res) => {
   // Setup SSE headers
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive'
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
   });
   
-  res.write('\n'); // Initiate connection
+  res.write(': keepalive\n\n');
 
   clients.add(res);
 
-  req.on('close', () => {
+  const cleanup = () => {
     clients.delete(res);
-  });
+  };
+
+  req.on('close', cleanup);
+  res.on('close', cleanup);
+  res.on('error', cleanup);
 });
+
+// Periodic keepalive ping so intermediate proxies/firewalls do not drop idle SSE connections
+setInterval(() => {
+  if (clients.size === 0) return;
+  clients.forEach(client => {
+    try {
+      if (!client.writableEnded && !client.destroyed) {
+        client.write(': ping\n\n');
+      } else {
+        clients.delete(client);
+      }
+    } catch {
+      clients.delete(client);
+    }
+  });
+}, 15000);
 
 // Helper function to broadcast to all connected clients
 sseRoutes.broadcast = (data) => {
@@ -30,7 +51,11 @@ sseRoutes.broadcast = (data) => {
   
   clients.forEach(client => {
     try {
-      client.write(payload);
+      if (!client.writableEnded && !client.destroyed) {
+        client.write(payload);
+      } else {
+        clients.delete(client);
+      }
     } catch (err) {
       logger.error('Error broadcasting to client, removing from list:', err.message);
       clients.delete(client);

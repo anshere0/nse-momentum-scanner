@@ -79,6 +79,41 @@ app.use((req, res) => {
   });
 });
 
+// Start HTTP server immediately so port 3000 responds right away without blocking on async network tasks
+const server = app.listen(PORT, () => {
+  logger.info(`Server running on port ${PORT}`);
+  logger.info(`Dashboard: ${process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`}`);
+});
+
+// Graceful shutdown
+const shutdown = async () => {
+  logger.info('Shutting down gracefully...');
+  server.close();
+  process.exit(0);
+};
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+
+// SSE broadcast interval
+function startBroadcast() {
+  setInterval(() => {
+    const currentStatus = marketSession.getMarketStatus();
+    if (currentStatus.isMarketOpen && marketState.dataMode !== 'LIVE') {
+      marketState.setDataMode('LIVE', currentStatus.currentDate);
+    }
+    const sourceName = process.env.DATA_SOURCE || 'angelone';
+    const source = getDataSource(sourceName);
+    if (source && source.getConnectionStatus) {
+      marketState.setConnectionStatus(source.getConnectionStatus());
+    }
+    const snapshot = marketState.getSnapshot();
+    sseRoutes.broadcast(snapshot);
+  }, 1000);
+}
+
+// Start broadcast interval immediately
+startBroadcast();
+
 // Startup Flow
 async function startApp() {
   logger.info('=== Indian Stock Market Scanner (Angel One SmartAPI) Starting ===');
@@ -181,45 +216,15 @@ async function startApp() {
 
     marketState.setConnectionStatus('CONNECTED');
     marketState.setScanning(true);
-
-    // Start SSE broadcast (1 per second)
-    startBroadcast();
-    logger.info('Data source initialized and broadcast started successfully');
+    logger.info('Data source initialized and broadcast running successfully');
   } catch (err) {
     logger.error('Failed to fully initialize data source:', err.message);
     marketState.setConnectionStatus('ERROR');
     marketState.setDataMode('UNAVAILABLE');
-    startBroadcast();
   }
-
-  const server = app.listen(PORT, () => {
-    logger.info(`Server running on port ${PORT}`);
-    logger.info(`Dashboard: ${process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`}`);
-  });
-
-  // Graceful shutdown
-  const shutdown = async () => {
-    logger.info('Shutting down gracefully...');
-    server.close();
-    process.exit(0);
-  };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-}
-
-// SSE broadcast interval
-function startBroadcast() {
-  setInterval(() => {
-    const currentStatus = marketSession.getMarketStatus();
-    if (currentStatus.isMarketOpen && marketState.dataMode !== 'LIVE') {
-      marketState.setDataMode('LIVE', currentStatus.currentDate);
-    }
-    const snapshot = marketState.getSnapshot();
-    sseRoutes.broadcast(snapshot);
-  }, 1000);
 }
 
 startApp().catch(err => {
-  logger.error('Fatal startup error:', err);
-  process.exit(1);
+  logger.error('Data source startup error:', err.message);
+  marketState.setConnectionStatus('ERROR');
 });

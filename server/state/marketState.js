@@ -122,13 +122,13 @@ class MarketState {
     this.pmhData = {};        // { high, low, month }
 
     // Scanner Results
-    this.topGainers = [];
-    this.topLosers = [];
-    this.allScanned = [];     // Full list after filters
-    this.indicesData = [];
+    this._topGainers = [];
+    this._topLosers = [];
+    this._allScanned = [];     // Full list after filters
+    this._indicesData = [];
 
     // Market Breadth
-    this.breadth = {
+    this._breadth = {
       advancing: 0,
       declining: 0,
       unchanged: 0,
@@ -140,7 +140,7 @@ class MarketState {
     };
 
     // Market Sentiment
-    this.sentiment = {
+    this._sentiment = {
       label: 'INSUFFICIENT_DATA',
       netBreadthPct: 0,
       rule: '',
@@ -156,6 +156,55 @@ class MarketState {
     this.lastUpdated = null;
     this.isScanning = false;
     this.tickCount = 0;
+    this.dirty = true;
+  }
+
+  get topGainers() {
+    if (this.dirty) this.recalculateAll();
+    return this._topGainers;
+  }
+  set topGainers(val) {
+    this._topGainers = val;
+  }
+
+  get topLosers() {
+    if (this.dirty) this.recalculateAll();
+    return this._topLosers;
+  }
+  set topLosers(val) {
+    this._topLosers = val;
+  }
+
+  get allScanned() {
+    if (this.dirty) this.recalculateAll();
+    return this._allScanned;
+  }
+  set allScanned(val) {
+    this._allScanned = val;
+  }
+
+  get indicesData() {
+    if (this.dirty) this.recalculateAll();
+    return this._indicesData;
+  }
+  set indicesData(val) {
+    this._indicesData = val;
+  }
+
+  get breadth() {
+    if (this.dirty) this.recalculateAll();
+    return this._breadth;
+  }
+  set breadth(val) {
+    this._breadth = val;
+  }
+
+  get sentiment() {
+    if (this.dirty) this.recalculateAll();
+    return this._sentiment;
+  }
+  set sentiment(val) {
+    this._sentiment = val;
   }
 
   setUniverse(universe) {
@@ -303,11 +352,17 @@ class MarketState {
 
     if (changed) {
       this.lastUpdated = Date.now();
-      this.recalculateLeaders();
-      this.recalculateIndices();
-      this.recalculateBreadth();
-      this.recalculateSentiment();
+      this.dirty = true;
     }
+  }
+
+  recalculateAll(force = false) {
+    if (!this.dirty && !force) return;
+    this.dirty = false;
+    this.recalculateLeaders();
+    this.recalculateIndices();
+    this.recalculateBreadth();
+    this.recalculateSentiment();
   }
 
   recalculateLeaders() {
@@ -577,21 +632,18 @@ class MarketState {
       ...newConfig
     };
     logger.info('Scanner config updated');
-    this.recalculateLeaders();
-    this.recalculateBreadth();
-    this.recalculateSentiment();
+    this.recalculateAll(true);
   }
 
   resetConfig() {
     SCANNER_CONFIG = { ...DEFAULT_CONFIG };
     loadConfigFromEnv();
     logger.info('Scanner config reset to defaults');
-    this.recalculateLeaders();
-    this.recalculateBreadth();
-    this.recalculateSentiment();
+    this.recalculateAll(true);
   }
 
   getSnapshot() {
+    this.recalculateAll();
     const ms = marketSession.getMarketStatus();
     return {
       timestamp: Date.now(),

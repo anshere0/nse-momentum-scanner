@@ -286,6 +286,9 @@ async function getPrevDayHL(universeListParam) {
 
   // Process in batches with rate limiting
   for (let i = 0; i < stocks.length; i++) {
+    if (!historicalApiSupported) {
+      break;
+    }
     const u = stocks[i];
     try {
       // Use cash token if available, otherwise use the F&O token
@@ -474,6 +477,10 @@ async function getLastDaySnapshot(universeListParam) {
   const fromDate = marketSession.getPreviousTradingDays(lastTradingDay, 5).pop() || lastTradingDay;
 
   for (let i = 0; i < stocks.length; i++) {
+    if (!historicalApiSupported) {
+      logger.info('Historical API not available (HTTP 403), skipping candle fallback');
+      break;
+    }
     const u = stocks[i];
     try {
       const token = u.cashToken || u.instrument_key;
@@ -587,13 +594,26 @@ function connectWebSocket() {
       startHeartbeat();
     });
 
+    let tickBatch = [];
+    let tickBatchTimer = null;
+
     ws.on('message', (data) => {
       try {
         if (data instanceof ArrayBuffer || Buffer.isBuffer(data)) {
           const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
           const tick = decodeBinaryPacket(buffer);
           if (tick && onTickCallback) {
-            onTickCallback([tick]);
+            tickBatch.push(tick);
+            if (!tickBatchTimer) {
+              tickBatchTimer = setTimeout(() => {
+                const batch = tickBatch;
+                tickBatch = [];
+                tickBatchTimer = null;
+                if (batch.length > 0) {
+                  onTickCallback(batch);
+                }
+              }, 50);
+            }
           }
         }
       } catch (err) {
@@ -602,6 +622,11 @@ function connectWebSocket() {
     });
 
     ws.on('close', (code, reason) => {
+      if (tickBatchTimer) {
+        clearTimeout(tickBatchTimer);
+        tickBatchTimer = null;
+      }
+      tickBatch = [];
       logger.warn(`Angel One WebSocket closed (code: ${code})`);
       connectionStatus = 'DISCONNECTED';
       stopHeartbeat();
