@@ -36,9 +36,37 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showConnectModal, setShowConnectModal] = useState(false);
-  const [activeView, setActiveView] = useState('boards'); // 'boards' or 'table'
+  const [activeView, setActiveView] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash.toLowerCase();
+      const params = new URLSearchParams(window.location.search);
+      if (hash === '#boards' || params.get('view') === 'boards' || params.get('tab') === 'boards') return 'boards';
+      if (hash === '#table' || params.get('view') === 'table' || params.get('tab') === 'table') return 'table';
+      if (hash === '#breakout' || params.get('view') === 'breakout' || params.get('tab') === 'breakout') return 'breakout';
+    }
+    return 'breakout'; // Default directly to the Live Volume Breakout Screener
+  });
   const [isScanning, setIsScanning] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Sync hash on hash change
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash.toLowerCase();
+      if (hash === '#breakout') setActiveView('breakout');
+      else if (hash === '#boards') setActiveView('boards');
+      else if (hash === '#table') setActiveView('table');
+    };
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  const handleSwitchView = (view) => {
+    setActiveView(view);
+    if (typeof window !== 'undefined') {
+      window.location.hash = view;
+    }
+  };
 
   // SSE connection
   useEffect(() => {
@@ -235,7 +263,7 @@ function App() {
             {/* View Switcher */}
             <div className="flex bg-[#0a0d14] p-1 rounded-xl border border-[#2a2e39]">
               <button
-                onClick={() => setActiveView('breakout')}
+                onClick={() => handleSwitchView('breakout')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
                   activeView === 'breakout' ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30' : 'text-gray-400 hover:text-white'
                 }`}
@@ -245,7 +273,7 @@ function App() {
                 <span>Volume Breakout</span>
               </button>
               <button
-                onClick={() => setActiveView('boards')}
+                onClick={() => handleSwitchView('boards')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
                   activeView === 'boards' ? 'bg-purple-600 text-white shadow' : 'text-gray-400 hover:text-white'
                 }`}
@@ -255,7 +283,7 @@ function App() {
                 <span>Boards</span>
               </button>
               <button
-                onClick={() => setActiveView('table')}
+                onClick={() => handleSwitchView('table')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
                   activeView === 'table' ? 'bg-purple-600 text-white shadow' : 'text-gray-400 hover:text-white'
                 }`}
@@ -269,7 +297,7 @@ function App() {
             {/* Quick Link to Pro Suite & Simple Screener */}
             <div className="hidden sm:flex items-center gap-1.5 bg-[#0a0d14] px-2 py-1 rounded-xl border border-[#2a2e39] text-xs">
               <a
-                href="http://localhost:3001/simple"
+                href={typeof window !== 'undefined' ? `http://${window.location.hostname}:3001/simple` : 'http://localhost:3001/simple'}
                 target="_blank"
                 rel="noreferrer"
                 className="text-gray-400 hover:text-purple-300 font-mono flex items-center gap-1 px-2 py-1 hover:bg-[#131722] rounded-lg transition"
@@ -280,7 +308,7 @@ function App() {
               </a>
               <span className="text-gray-600">|</span>
               <a
-                href="http://localhost:3001/pro"
+                href={typeof window !== 'undefined' ? `http://${window.location.hostname}:3001/pro` : 'http://localhost:3001/pro'}
                 target="_blank"
                 rel="noreferrer"
                 className="text-indigo-400 hover:text-indigo-300 font-mono font-semibold flex items-center gap-1 px-2 py-1 hover:bg-[#131722] rounded-lg transition"

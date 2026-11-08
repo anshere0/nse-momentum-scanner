@@ -96,7 +96,15 @@ export default function ProLayout({ onNavigateSimple }) {
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <a
+            href={typeof window !== 'undefined' ? `http://${window.location.hostname}:3000/#breakout` : 'http://localhost:3000/#breakout'}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold transition cursor-pointer shadow-lg shadow-purple-600/30"
+            title="Open Live Volume Breakout & Breakdown Screener on Port 3000"
+          >
+            <TrendingUp className="w-4 h-4" />
+            <span>Volume Breakout (:3000)</span>
+          </a>
           <button
             onClick={onNavigateSimple}
             className="flex items-center gap-2 px-3.5 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-lg text-xs font-semibold transition cursor-pointer border border-gray-700"

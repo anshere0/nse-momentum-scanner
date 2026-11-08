@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Search, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, ChevronLeft, ChevronRight, 
-  SlidersHorizontal, X, RotateCcw, Info, Check, Filter, Layers, Zap, Building2, HelpCircle
+  SlidersHorizontal, X, RotateCcw, Info, Check, Filter, Layers, Zap, Building2, HelpCircle, TrendingUp
 } from 'lucide-react';
 
 const API_BASE = '';
@@ -203,8 +203,16 @@ export default function SimpleTable() {
           </p>
         </div>
 
-        {/* Right side controls: Last update & Refresh */}
-        <div className="flex items-center gap-3 text-xs sm:text-sm text-gray-400 self-start md:self-auto">
+        {/* Right side controls: Last update, Breakout link & Refresh */}
+        <div className="flex flex-wrap items-center gap-2.5 text-xs sm:text-sm text-gray-400 self-start md:self-auto">
+          <a
+            href={typeof window !== 'undefined' ? `http://${window.location.hostname}:3000/#breakout` : 'http://localhost:3000/#breakout'}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold transition cursor-pointer shadow-lg shadow-purple-600/30"
+            title="Open Live Volume Breakout & Breakdown Screener on Port 3000"
+          >
+            <TrendingUp className="w-3.5 h-3.5" />
+            <span>Volume Breakout (:3000)</span>
+          </a>
           {lastUpdated && (
             <span>
               Updated: <strong className="text-gray-200">{lastUpdated.toLocaleTimeString('en-IN')}</strong>
