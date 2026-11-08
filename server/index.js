@@ -8,6 +8,8 @@ const { getDataSource } = require('./dataSource');
 const authRoutes = require('./routes/auth');
 const { apiRoutes, setDataSource } = require('./routes/api');
 const sseRoutes = require('./routes/sse');
+const breakoutRoutes = require('./routes/breakoutRoutes');
+const breakoutEngine = require('./services/breakoutEngine');
 const tokenStore = require('./utils/tokenStore');
 const marketState = require('./state/marketState');
 const marketSession = require('./services/marketSession');
@@ -65,6 +67,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/admin', authRoutes.adminRoutes);
 app.use('/auth', authRoutes.authRoutes);
 app.use('/api', apiRoutes);
+app.use('/api/breakout', breakoutRoutes);
 app.use('/sse', sseRoutes);
 
 // Serve static React client build
@@ -152,6 +155,9 @@ async function startApp() {
     }
 
     const fullUniverse = [...fnoUniverse, ...cashUniverse];
+    if (dataSource.setUniverseList) {
+      dataSource.setUniverseList(fullUniverse);
+    }
 
     // Load Baseline OI reference and PDH/PDL from official NSE Bhavcopy
     try {
@@ -216,6 +222,12 @@ async function startApp() {
 
     marketState.setConnectionStatus('CONNECTED');
     marketState.setScanning(true);
+
+    // Initialize and start Live Volume Breakout & Breakdown Scanner
+    breakoutEngine.setDataSource(dataSource);
+    breakoutEngine.startAutoScan();
+    logger.info('Live Volume Breakout & Breakdown scanner initialized and auto-scanning');
+
     logger.info('Data source initialized and broadcast running successfully');
   } catch (err) {
     logger.error('Failed to fully initialize data source:', err.message);

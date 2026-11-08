@@ -112,6 +112,16 @@ async function reconnect() {
 }
 
 /**
+ * Set full universe list
+ */
+function setUniverseList(list) {
+  if (Array.isArray(list) && list.length > 0) {
+    universeList = list;
+    logger.info(`Angel One data source universe updated: ${universeList.length} instruments`);
+  }
+}
+
+/**
  * Get F&O universe
  */
 async function getFnoUniverse() {
@@ -125,7 +135,12 @@ async function getFnoUniverse() {
  * Get Cash equity universe (defaults to F&O-eligible cash equities for speed & quality)
  */
 async function getCashUniverse(fnoOnly = true) {
-  return instrumentMaster.getCashUniverse(fnoOnly);
+  const cash = instrumentMaster.getCashUniverse(fnoOnly);
+  // Keep universeList updated with both F&O, Cash and Indices
+  const existingFno = universeList.filter(u => u.isFno);
+  const existingIndices = universeList.filter(u => u.type === 'INDEX');
+  universeList = [...existingFno, ...cash, ...existingIndices];
+  return cash;
 }
 
 /**
@@ -400,11 +415,10 @@ async function getLastDaySnapshot(universeListParam) {
     return [];
   }
 
-  const stocks = universeListParam.filter(u => u.type === 'STOCK');
-  const indices = universeListParam.filter(u => u.type === 'INDEX');
+  const allItems = universeListParam && universeListParam.length > 0 ? universeListParam : universeList;
   const lastTradingDay = marketSession.getLastCompletedTradingDay();
 
-  logger.info(`Loading snapshot for ${stocks.length} stocks via Angel One market quotes...`);
+  logger.info(`Loading snapshot for ${allItems.length} instruments (F&O, Cash & Indices) via Angel One market quotes...`);
 
   // Load cached reference OI to calculate genuine OI change %
   const cachedOiObj = oiCache.load();
@@ -412,8 +426,8 @@ async function getLastDaySnapshot(universeListParam) {
   const currentOiMap = {};
 
   try {
-    // Fast path: use batch market quotes (50 tokens per request) - takes ~1.5s total
-    const quotes = await getMarketQuotes(stocks, 'FULL');
+    // Fast path: use batch market quotes (50 tokens per request)
+    const quotes = await getMarketQuotes(allItems, 'FULL');
     if (quotes && quotes.length > 0) {
       const quoteMap = {};
       quotes.forEach(q => {
@@ -421,10 +435,11 @@ async function getLastDaySnapshot(universeListParam) {
       });
 
       const snapshot = [];
-      stocks.forEach(u => {
+      allItems.forEach(u => {
         const q = quoteMap[u.instrument_key];
         if (q && q.ltp > 0) {
           const isFno = u.isFno ?? (u.exchange === 'NFO' || u.instrumentType === 'FUTSTK');
+          const isIndex = u.type === 'INDEX';
           const oiVal = isFno ? (parseInt(q.opnInterest) || 0) : 0;
           if (isFno && oiVal > 0) {
             currentOiMap[u.instrument_key] = oiVal;
@@ -442,20 +457,22 @@ async function getLastDaySnapshot(universeListParam) {
             tradingsymbol: u.tradingsymbol,
             symbol: u.tradingsymbol,
             name: u.name,
-            category: u.category || (isFno ? 'F&O' : 'Cash'),
-            isFno,
+            category: u.category || (isIndex ? 'Index' : (isFno ? 'F&O' : 'Cash')),
+            isFno: !!isFno,
+            isIndex: !!isIndex,
+            type: u.type || (isIndex ? 'INDEX' : 'STOCK'),
             exchange: u.exchange,
-            ltp: q.ltp,
-            close: q.close || q.ltp,
-            open: q.open || q.ltp,
-            high: q.high || q.ltp,
-            low: q.low || q.ltp,
-            volume: q.tradeVolume || 0,
+            ltp: parseFloat(q.ltp) || 0,
+            close: parseFloat(q.close) || parseFloat(q.ltp) || 0,
+            open: parseFloat(q.open) || parseFloat(q.ltp) || 0,
+            high: parseFloat(q.high) || parseFloat(q.ltp) || 0,
+            low: parseFloat(q.low) || parseFloat(q.ltp) || 0,
+            volume: parseInt(q.tradeVolume) || 0,
             oi: oiVal,
             previousOi: prevOi || oiVal,
             oi_change_pct: oiChangePct,
-            prevHigh: q.high,
-            prevLow: q.low,
+            prevHigh: parseFloat(q.high) || null,
+            prevLow: parseFloat(q.low) || null,
             sessionDate: lastTradingDay
           });
         }
@@ -803,14 +820,13 @@ async function pollQuotes() {
   if (!authData || universeList.length === 0) return;
 
   try {
-    const stocks = universeList.filter(u => u.type === 'STOCK');
-
-    // Query each instrument using its direct instrument key and exchange
-    const quoteInstruments = stocks.map(u => ({
+    // Query each instrument using its direct instrument key and exchange (both stocks and indices)
+    const quoteInstruments = universeList.map(u => ({
       instrument_key: u.instrument_key,
-      exchange: u.exchange || (u.instrumentType === 'FUTSTK' ? 'NFO' : 'NSE'),
+      exchange: u.exchange || (u.instrumentType === 'FUTSTK' || u.instrumentType === 'FUTIDX' ? 'NFO' : 'NSE'),
       originalKey: u.instrument_key,
-      isFno: u.isFno ?? (u.exchange === 'NFO' || u.instrumentType === 'FUTSTK')
+      isFno: u.isFno ?? (u.exchange === 'NFO' || u.instrumentType === 'FUTSTK'),
+      type: u.type
     }));
 
     const results = await getMarketQuotes(quoteInstruments, 'FULL');
@@ -826,6 +842,9 @@ async function pollQuotes() {
           instrument_key: key,
           tradingsymbol: matched?.tradingsymbol || r.tradingSymbol,
           name: matched?.underlying || matched?.name,
+          category: matched?.category || (isFno ? 'F&O' : (matched?.type === 'INDEX' ? 'Index' : 'Cash')),
+          isFno: !!isFno,
+          type: matched?.type || 'STOCK',
           ltp: parseFloat(r.ltp) || 0,
           close: parseFloat(r.close) || 0,
           open: parseFloat(r.open) || 0,
@@ -833,6 +852,8 @@ async function pollQuotes() {
           low: parseFloat(r.low) || 0,
           volume: parseInt(r.tradeVolume) || 0,
           oi: isFno ? (parseInt(r.opnInterest) || 0) : 0,
+          prevHigh: parseFloat(r.high) || null,
+          prevLow: parseFloat(r.low) || null
         };
       }).filter(t => t.ltp > 0);
 
@@ -883,5 +904,6 @@ module.exports = {
   getMarketQuotes,
   getHistoricalCandles,
   getConnectionStatus,
+  setUniverseList,
   disconnect
 };

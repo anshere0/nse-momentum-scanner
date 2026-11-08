@@ -22,6 +22,45 @@ apiRoutes.get('/snapshot', (req, res) => {
 });
 
 /**
+ * GET /api/cash-stocks
+ * Live verified cash equities with prices and signals
+ */
+apiRoutes.get('/cash-stocks', (req, res) => {
+  res.json({
+    timestamp: Date.now(),
+    stocks: marketState.getAllCashStocks()
+  });
+});
+
+/**
+ * POST /api/quotes
+ * Batch fetch real quotes from Angel One SmartAPI for any tokens
+ */
+apiRoutes.post('/quotes', async (req, res) => {
+  try {
+    const { exchange = 'NSE', tokens = [] } = req.body;
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+      return res.status(400).json({ success: false, error: 'tokens array required' });
+    }
+
+    if (!activeDataSource || !activeDataSource.getMarketQuotes) {
+      return res.status(503).json({ success: false, error: 'Data source not available' });
+    }
+
+    const instruments = tokens.map(t => ({
+      instrument_key: String(t),
+      exchange: exchange
+    }));
+
+    const quotes = await activeDataSource.getMarketQuotes(instruments, 'FULL');
+    res.json({ success: true, count: quotes.length, quotes });
+  } catch (err) {
+    logger.error('API /quotes error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
  * GET /api/universe
  * Current tracked universe
  */
@@ -175,7 +214,11 @@ apiRoutes.post('/scan/stop', (req, res) => {
 apiRoutes.post('/refresh', async (req, res) => {
   try {
     if (activeDataSource && activeDataSource.getLastDaySnapshot) {
-      const universe = marketState.fnoUniverse;
+      const universe = [
+        ...(marketState.fnoUniverse || []),
+        ...(marketState.cashUniverse || []),
+        ...(marketState.indicesUniverse || [])
+      ];
       const snapshot = await activeDataSource.getLastDaySnapshot(universe);
       if (snapshot.length > 0) {
         marketState.updateTicks(snapshot);

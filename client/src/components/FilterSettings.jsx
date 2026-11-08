@@ -36,7 +36,7 @@ const FilterSettings = ({ onClose, onSaved }) => {
     marketCapUnit: 'crore',
 
     // OI Filter (Critical)
-    oiFilterEnabled: true,
+    oiFilterEnabled: false,
     MIN_OI_CHANGE_PCT: 5.0,
     MAX_OI_CHANGE_PCT: 500.0,
     oiPositiveOnly: false,

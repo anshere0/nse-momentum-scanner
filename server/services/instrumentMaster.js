@@ -14,6 +14,15 @@ const TARGET_INDICES = [
   'NIFTY MIDCAP 50', 'NIFTY MID SELECT', 'NIFTY MIDCAP 150'
 ];
 
+// Mapping between Index spot name and its NFO futures underlying name
+const INDEX_FUTURES_MAP = {
+  'NIFTY 50': 'NIFTY',
+  'NIFTY BANK': 'BANKNIFTY',
+  'NIFTY FIN SERVICE': 'FINNIFTY',
+  'NIFTY MID SELECT': 'MIDCPNIFTY',
+  'NIFTY IT': 'NIFTYIT',
+};
+
 // Normalized names for display
 const INDEX_DISPLAY_NAMES = {
   'NIFTY 50': 'NIFTY 50',
@@ -220,28 +229,67 @@ function getCashUniverse(fnoOnly = false) {
 function getIndices() {
   if (!instrumentsCache) return [];
 
+  const now = new Date();
+  // Map index futures (FUTIDX) near-month contracts
+  const indexFuturesGroups = {};
+  for (const inst of instrumentsCache) {
+    if (inst.exch_seg === 'NFO' && inst.instrumenttype === 'FUTIDX' && inst.expiry) {
+      const underlying = (inst.name || '').toUpperCase().trim();
+      if (!underlying) continue;
+      try {
+        const expDate = parseAngelExpiry(inst.expiry);
+        if (expDate >= now) {
+          if (!indexFuturesGroups[underlying]) indexFuturesGroups[underlying] = [];
+          indexFuturesGroups[underlying].push(inst);
+        }
+      } catch {}
+    }
+  }
+
+  // Sort by expiry ascending
+  for (const key of Object.keys(indexFuturesGroups)) {
+    indexFuturesGroups[key].sort((a, b) => parseAngelExpiry(a.expiry) - parseAngelExpiry(b.expiry));
+  }
+
   const universe = [];
   const foundIndices = new Set();
 
   for (const inst of instrumentsCache) {
     if (inst.exch_seg !== 'NSE') continue;
 
-    const name = (inst.name || inst.symbol || '').toUpperCase().trim();
+    const name = (inst.name || '').toUpperCase().trim();
+    const symbol = (inst.symbol || '').toUpperCase().trim();
 
     for (const target of TARGET_INDICES) {
       const normalized = target.toUpperCase().trim();
-      if (name === normalized || name === normalized.replace(/ /g, '')) {
+      const normNoSpace = normalized.replace(/ /g, '');
+      
+      const isMatch = (name === normalized || name === normNoSpace) ||
+                      (symbol === normalized || symbol === normNoSpace) ||
+                      (normalized === 'NIFTY 50' && (symbol === 'NIFTY 50' || name === 'NIFTY')) ||
+                      (normalized === 'NIFTY BANK' && (symbol === 'NIFTY BANK' || name === 'BANKNIFTY'));
+
+      if (isMatch) {
         if (foundIndices.has(normalized)) continue;
         foundIndices.add(normalized);
+
+        const futUnderlying = INDEX_FUTURES_MAP[normalized] || normalized.replace(/ /g, '');
+        const activeFutures = indexFuturesGroups[futUnderlying] || [];
+        const nearFuture = activeFutures.length > 0 ? activeFutures[0] : null;
 
         universe.push({
           instrument_key: inst.token,
           tradingsymbol: inst.symbol,
           name: INDEX_DISPLAY_NAMES[normalized] || normalized,
           type: 'INDEX',
+          category: 'Index',
+          isIndex: true,
           exchange: 'NSE',
           exchangeType: 1, // NSE_CM
-          instrumentType: 'INDEX'
+          instrumentType: 'INDEX',
+          futuresToken: nearFuture ? nearFuture.token : null,
+          futuresSymbol: nearFuture ? nearFuture.symbol : null,
+          futuresExpiry: nearFuture ? nearFuture.expiry : null
         });
         break;
       }

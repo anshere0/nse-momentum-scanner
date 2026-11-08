@@ -1,6 +1,26 @@
+# Dependencies
 node_modules/
-.env
 client/node_modules/
+pro-suite/node_modules/
+pro-suite/client/node_modules/
+**/node_modules/
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Build artifacts
 client/dist/
+pro-suite/client/dist/
+**/dist/
+
+# Cache & logs
 data/
 *.log
+**/*.log
+.DS_Store
+Thumbs.db

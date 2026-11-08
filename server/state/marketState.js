@@ -429,15 +429,16 @@ class MarketState {
 
       // OI Change Filter (only applies to derivatives; cash stocks don't carry contract OI)
       if (config.oiFilterEnabled) {
-        if (!isFno) {
-          if (segment === 'BOTH' || segment === 'CASH') continue;
-        } else {
+        if (isFno) {
           if (config.oiPositiveOnly && oiChange <= 0) continue;
           if (config.oiNegativeOnly && oiChange >= 0) continue;
           const absOiChange = Math.abs(oiChange);
           if (absOiChange < config.MIN_OI_CHANGE_PCT || absOiChange > config.MAX_OI_CHANGE_PCT) continue;
           if (config.minAbsoluteOI > 0 && oi < config.minAbsoluteOI) continue;
+        } else if (segment === 'BOTH') {
+          continue;
         }
+        // In CASH mode, cash equities do not carry contract OI; do not discard them
       }
 
       // Previous Month High/Low Filter
@@ -642,6 +643,111 @@ class MarketState {
     this.recalculateAll(true);
   }
 
+  getAllFnoStocks() {
+    const list = [];
+    for (const inst of (this.fnoUniverse || [])) {
+      const key = inst.instrument_key;
+      const ltp = this.ltpMap[key] || 0;
+      if (ltp <= 0) continue;
+      const pc = this.pcMap[key] || 0;
+      const open = this.openMap[key] || ltp;
+      const pdh = this.pdhData[key]?.high || null;
+      const pdl = this.pdhData[key]?.low || null;
+      const pdhClose = this.pdhData[key]?.close || null;
+      const pmh = this.pmhData[key]?.high || null;
+      const pml = this.pmhData[key]?.low || null;
+      const oiChange = this.oiChangeMap[key] || 0;
+      const oi = this.oiMap[key] || 0;
+      const volume = this.volumeMap[key] || 0;
+      const high = this.highMap[key] || 0;
+      const low = this.lowMap[key] || 0;
+
+      // Linked underlying cash equity price
+      const cashKey = inst.cashToken;
+      const cashLtp = cashKey ? (this.ltpMap[cashKey] || null) : null;
+      const cashPc = cashKey ? (this.pcMap[cashKey] || null) : null;
+      const basis = (ltp > 0 && cashLtp && cashLtp > 0) ? Math.round((ltp - cashLtp) * 100) / 100 : null;
+
+      list.push({
+        ...inst,
+        symbol: inst.symbol || inst.tradingsymbol || inst.name,
+        token: inst.instrument_key,
+        category: 'F&O',
+        isFno: true,
+        segment: 'FNO',
+        ltp,
+        pc,
+        open,
+        pdh,
+        pdl,
+        pdhClose,
+        pmh,
+        pml,
+        oi,
+        oi_change_pct: oiChange,
+        volume,
+        high,
+        low,
+        cashLtp,
+        cashPc,
+        basis
+      });
+    }
+    return list;
+  }
+
+  getAllCashStocks() {
+    const list = [];
+    for (const inst of (this.cashUniverse || [])) {
+      const key = inst.instrument_key;
+      const ltp = this.ltpMap[key] || 0;
+      if (ltp <= 0) continue;
+      const pc = this.pcMap[key] || 0;
+      const open = this.openMap[key] || ltp;
+      const close = this.closeMap[key] || this.pdhData[key]?.close || (ltp - (ltp * pc / 100));
+      const change = Math.round((ltp - close) * 100) / 100;
+      const pChange = Math.round(pc * 100) / 100;
+      const high = this.highMap[key] || ltp;
+      const low = this.lowMap[key] || ltp;
+      const volume = this.volumeMap[key] || 0;
+      const pdh = this.pdhData[key]?.high || null;
+      const pdl = this.pdhData[key]?.low || null;
+      const pmh = this.pmhData[key]?.high || null;
+      const pml = this.pmhData[key]?.low || null;
+
+      const signals = [];
+      if (pdh && ltp >= pdh) signals.push('PDH B/O');
+      if (pdl && ltp <= pdl) signals.push('PDL B/D');
+      if (pmh && ltp >= pmh) signals.push('PMH B/O');
+      if (pml && ltp <= pml) signals.push('PML B/D');
+
+      list.push({
+        ...inst,
+        symbol: inst.symbol || inst.tradingsymbol?.replace('-EQ', '') || inst.name,
+        token: inst.instrument_key,
+        category: 'Cash',
+        isFno: false,
+        segment: 'CASH',
+        ltp,
+        close: Math.round(close * 100) / 100,
+        change,
+        pc: pChange,
+        pChange,
+        open,
+        high,
+        low,
+        volume,
+        pdh,
+        pdl,
+        pmh,
+        pml,
+        signals,
+        signalStr: signals.join(', ') || '-'
+      });
+    }
+    return list;
+  }
+
   getSnapshot() {
     this.recalculateAll();
     const ms = marketSession.getMarketStatus();
@@ -651,6 +757,8 @@ class MarketState {
       losers: this.topLosers,
       indices: this.indicesData,
       allScanned: this.allScanned,
+      fnoStocks: this.getAllFnoStocks(),
+      cashStocks: this.getAllCashStocks(),
       breadth: this.breadth,
       sentiment: this.sentiment,
       status: {

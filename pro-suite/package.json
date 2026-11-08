@@ -1,0 +1,21 @@
+{
+  "name": "pro-suite",
+  "version": "1.0.0",
+  "description": "NSE Quantitative Pro-Suite & Simple Stock Viewer",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "build:client": "cd client && npm install && npm run build",
+    "test": "node --test server/tests/*.test.js",
+    "health": "node check-health.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0"
+  }
+}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Activity, SlidersHorizontal, Shield, Play, Square, RefreshCw, 
-  TableProperties, LayoutDashboard, AlertCircle, Clock, Calendar, CheckCircle, Wifi, WifiOff
+  TableProperties, LayoutDashboard, AlertCircle, Clock, Calendar, CheckCircle, Wifi, WifiOff, TrendingUp, ExternalLink
 } from 'lucide-react';
 import IndicesBarChart from './components/IndicesBarChart';
 import MomentumBoard from './components/MomentumBoard';
@@ -9,6 +9,7 @@ import FilterSettings from './components/FilterSettings';
 import ConnectBrokerModal from './components/ConnectBrokerModal';
 import MarketOverview from './components/MarketOverview';
 import ScannerTable from './components/ScannerTable';
+import BreakoutScreener from './components/BreakoutScreener';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -234,6 +235,16 @@ function App() {
             {/* View Switcher */}
             <div className="flex bg-[#0a0d14] p-1 rounded-xl border border-[#2a2e39]">
               <button
+                onClick={() => setActiveView('breakout')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
+                  activeView === 'breakout' ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30' : 'text-gray-400 hover:text-white'
+                }`}
+                title="Live Volume Breakout & Breakdown Scanner"
+              >
+                <TrendingUp size={14} className={activeView === 'breakout' ? 'text-white' : 'text-emerald-400'} />
+                <span>Volume Breakout</span>
+              </button>
+              <button
                 onClick={() => setActiveView('boards')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
                   activeView === 'boards' ? 'bg-purple-600 text-white shadow' : 'text-gray-400 hover:text-white'
@@ -253,6 +264,31 @@ function App() {
                 <TableProperties size={14} />
                 <span>Scanner Table</span>
               </button>
+            </div>
+
+            {/* Quick Link to Pro Suite & Simple Screener */}
+            <div className="hidden sm:flex items-center gap-1.5 bg-[#0a0d14] px-2 py-1 rounded-xl border border-[#2a2e39] text-xs">
+              <a
+                href="http://localhost:3001/simple"
+                target="_blank"
+                rel="noreferrer"
+                className="text-gray-400 hover:text-purple-300 font-mono flex items-center gap-1 px-2 py-1 hover:bg-[#131722] rounded-lg transition"
+                title="Open Simple Stock Viewer on Port 3001"
+              >
+                <span>Simple Screener</span>
+                <ExternalLink size={11} />
+              </a>
+              <span className="text-gray-600">|</span>
+              <a
+                href="http://localhost:3001/pro"
+                target="_blank"
+                rel="noreferrer"
+                className="text-indigo-400 hover:text-indigo-300 font-mono font-semibold flex items-center gap-1 px-2 py-1 hover:bg-[#131722] rounded-lg transition"
+                title="Open Pro Suite on Port 3001"
+              >
+                <span>Pro Suite</span>
+                <ExternalLink size={11} />
+              </a>
             </div>
 
             {/* Scan Toggle */}
@@ -309,7 +345,9 @@ function App() {
         />
 
         {/* Main Content Area */}
-        {activeView === 'boards' ? (
+        {activeView === 'breakout' ? (
+          <BreakoutScreener />
+        ) : activeView === 'boards' ? (
           <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
             {/* Gainers & Losers Boards (3 columns) */}
             <div className="xl:col-span-3 flex flex-col gap-6">
