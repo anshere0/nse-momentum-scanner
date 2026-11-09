@@ -38,11 +38,12 @@ router.get('/config', (req, res) => {
 router.post('/config', async (req, res) => {
   try {
     const newConfig = req.body;
-    breakoutEngine.updateConfig(newConfig);
+    const updated = await breakoutEngine.updateConfig(newConfig);
     res.json({
       success: true,
-      message: 'Configuration updated and scanner recalculating',
-      config: breakoutEngine.getConfig()
+      message: 'Configuration updated and scanner recalculated',
+      config: updated,
+      signalsCount: breakoutEngine.signals.size
     });
   } catch (err) {
     logger.error('Failed to update breakout config:', err.message);
@@ -90,9 +91,9 @@ router.get('/candles', async (req, res) => {
       symbol: symbol || effectiveToken
     };
 
-    const histData = await breakoutEngine.getOrFetchHistoricalLevels(targetInst);
+    const histData = await breakoutEngine.getChartCandles(targetInst, timeframe);
 
-    if (!histData) {
+    if (!histData || !histData.candles || histData.candles.length === 0) {
       return res.status(404).json({ error: 'Historical candle data unavailable for this instrument' });
     }
 
@@ -105,7 +106,7 @@ router.get('/candles', async (req, res) => {
       support: histData.support,
       avgVolume: histData.avgVolume,
       candles: histData.candles || [],
-      candlesCount: histData.candlesCount,
+      candlesCount: histData.candles.length,
       fromDate: histData.fromDate,
       toDate: histData.toDate
     });

@@ -258,9 +258,12 @@ async function getHistoricalCandles(symboltoken, exchange, interval, fromdate, t
     if (err.response?.status === 401) {
       connectionStatus = 'SESSION_EXPIRED';
     } else if (err.response?.status === 403) {
-      if (historicalApiSupported) {
-        logger.info('Angel One Historical API requires separate add-on subscription (HTTP 403). Skipping historical candle queries.');
-        historicalApiSupported = false;
+      const errMsg = err.response?.data?.message || err.message || '';
+      if (errMsg.toLowerCase().includes('access rate') || errMsg.toLowerCase().includes('rate')) {
+        logger.warn(`Rate limit on historical candle fetch for ${symboltoken}, backing off`);
+        await sleep(400);
+      } else {
+        logger.warn(`Historical candle 403 for token ${symboltoken}: ${errMsg}`);
       }
     } else {
       logger.error(`Historical fetch error (${symboltoken}):`, err.response?.data?.message || err.message);

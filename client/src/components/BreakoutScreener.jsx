@@ -66,6 +66,7 @@ export default function BreakoutScreener() {
   const [sortField, setSortField] = useState('volumeRatio');
   const [sortDir, setSortDir] = useState('desc');
   const [showConfigDrawer, setShowConfigDrawer] = useState(false);
+  const isDrawerOpenRef = useRef(false);
   const [selectedSignalForChart, setSelectedSignalForChart] = useState(null);
   const [isPaused, setIsPaused] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -74,6 +75,19 @@ export default function BreakoutScreener() {
   const [formConfig, setFormConfig] = useState({ ...data.config });
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [configSuccessMsg, setConfigSuccessMsg] = useState(null);
+
+  const handleOpenConfigDrawer = () => {
+    if (data.config) {
+      setFormConfig({ ...data.config });
+    }
+    isDrawerOpenRef.current = true;
+    setShowConfigDrawer(true);
+  };
+
+  const handleCloseConfigDrawer = () => {
+    isDrawerOpenRef.current = false;
+    setShowConfigDrawer(false);
+  };
 
   // Fetch signals from API
   const fetchSignals = async (tab = activeTab, isManual = false) => {
@@ -85,7 +99,8 @@ export default function BreakoutScreener() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setData(json);
-      if (!showConfigDrawer && json.config) {
+      // Strictly prevent background polling from wiping out user's draft configuration
+      if (!isDrawerOpenRef.current && json.config) {
         setFormConfig(json.config);
       }
     } catch (err) {
@@ -117,11 +132,17 @@ export default function BreakoutScreener() {
       });
       const resJson = await res.json();
       if (resJson.success) {
-        setConfigSuccessMsg('Settings updated! Recalculating signals in background...');
+        if (resJson.config) {
+          setData(prev => ({
+            ...prev,
+            config: resJson.config
+          }));
+        }
+        setConfigSuccessMsg('Settings updated! Recalculating signals...');
         setTimeout(() => {
           setConfigSuccessMsg(null);
-          setShowConfigDrawer(false);
-        }, 1200);
+          handleCloseConfigDrawer();
+        }, 800);
         fetchSignals(activeTab, true);
       }
     } catch (err) {
@@ -146,11 +167,15 @@ export default function BreakoutScreener() {
     };
     setFormConfig(defaults);
     try {
-      await fetch(`${API_BASE}/api/breakout/config`, {
+      const res = await fetch(`${API_BASE}/api/breakout/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(defaults)
       });
+      const resJson = await res.json();
+      if (resJson.success && resJson.config) {
+        setData(prev => ({ ...prev, config: resJson.config }));
+      }
       fetchSignals(activeTab, true);
     } catch (err) {}
   };
@@ -439,7 +464,7 @@ export default function BreakoutScreener() {
 
           {/* Settings Button */}
           <button
-            onClick={() => setShowConfigDrawer(true)}
+            onClick={handleOpenConfigDrawer}
             className="px-3.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-purple-600/20 transition"
           >
             <SlidersHorizontal size={14} />
@@ -664,7 +689,7 @@ export default function BreakoutScreener() {
                 </div>
               </div>
               <button
-                onClick={() => setShowConfigDrawer(false)}
+                onClick={handleCloseConfigDrawer}
                 className="p-2 rounded-xl bg-[#1e2330] text-gray-400 hover:text-white transition"
               >
                 <X size={18} />
@@ -902,7 +927,7 @@ export default function BreakoutScreener() {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setShowConfigDrawer(false)}
+                    onClick={handleCloseConfigDrawer}
                     className="px-4 py-2 bg-transparent text-gray-400 hover:text-white rounded-xl text-xs transition"
                   >
                     Cancel
