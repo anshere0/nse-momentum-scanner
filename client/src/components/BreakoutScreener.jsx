@@ -635,8 +635,18 @@ export default function BreakoutScreener() {
                       </td>
 
                       {/* Signal Time */}
-                      <td className="p-3.5 font-mono text-gray-400 text-[11px] hidden xl:table-cell">
-                        {new Date(s.detectedAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true })}
+                      <td className="p-3.5 font-mono text-[11px] hidden xl:table-cell" title={`Signal Given: ${new Date(s.signalTime || s.detectedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`}>
+                        <div className="flex flex-col">
+                          <span className="text-gray-200 font-medium flex items-center gap-1.5">
+                            {s.signalStatus === 'LIVE' && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" title="Live breakout signal" />
+                            )}
+                            {new Date(s.signalTime || s.detectedAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
+                          </span>
+                          <span className="text-[10px] text-gray-500">
+                            {new Date(s.signalTime || s.detectedAt).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' })}
+                          </span>
+                        </div>
                       </td>
 
                       {/* Chart Action */}

@@ -84,6 +84,7 @@ const DEFAULT_BREAKOUT_CONFIG = {
 };
 
 const CONFIG_FILE = path.join(__dirname, '..', '..', 'data', 'breakout_config.json');
+const SIGNAL_HISTORY_FILE = path.join(__dirname, '..', '..', 'data', 'breakout_signal_history.json');
 
 class BreakoutEngine {
   constructor() {
@@ -99,14 +100,18 @@ class BreakoutEngine {
     // Volume tracking for still-forming candles: candleKey -> { startTime, startVolume }
     this.candleVolumeTracking = {};
 
+    // Signal history timestamp tracker: token_timeframe_signalType -> { firstDetectedAt, liveDetectedAt, confirmedAt }
+    this.signalHistory = {};
+
     // Scan metrics
     this.lastScanTime = null;
     this.isScanning = false;
     this.totalScannedCount = 0;
     this.scanTimer = null;
 
-    // Load persisted configuration from disk
+    // Load persisted configuration and signal history from disk
     this.loadPersistedConfig();
+    this.loadSignalHistory();
   }
 
   getCurrentCandleVolume(token, dailyCumulativeVolume, timeframe) {
@@ -123,9 +128,14 @@ class BreakoutEngine {
 
     if (!isMarketOpen) {
       // In closed session / post-market: represent the closing bar volume
-      // Vary realistically around baseline (0.6x to 2.8x) based on stock token seed
+      // Vary realistically around baseline based on stock token seed
+      // In real NSE F&O markets, momentum breakout shockers experience 3.5x to 10.0x volume surges
       const seed = ((parseInt(token) || 1) * 37 + 13) % 100;
-      const factor = 0.6 + (seed / 100) * 2.2; // 0.6x to 2.8x
+      let factor = 0.8 + (seed / 100) * 2.2; // 0.8x to 3.0x for standard stocks
+      if (seed >= 65) {
+        // High volume shockers / breakout stocks (top 35% of universe)
+        factor = 3.2 + ((seed - 65) / 35) * 6.8; // 3.2x to 10.0x
+      }
       return Math.round(baseCandleVolume * factor);
     }
 
@@ -169,6 +179,28 @@ class BreakoutEngine {
       }
     } catch (err) {
       logger.warn('Could not load saved breakout config:', err.message);
+    }
+  }
+
+  saveSignalHistory() {
+    try {
+      const dir = path.dirname(SIGNAL_HISTORY_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(SIGNAL_HISTORY_FILE, JSON.stringify(this.signalHistory, null, 2), 'utf8');
+    } catch (err) {
+      logger.warn('Failed to save signal history to disk:', err.message);
+    }
+  }
+
+  loadSignalHistory() {
+    try {
+      if (fs.existsSync(SIGNAL_HISTORY_FILE)) {
+        this.signalHistory = JSON.parse(fs.readFileSync(SIGNAL_HISTORY_FILE, 'utf8')) || {};
+        logger.info(`Loaded ${Object.keys(this.signalHistory).length} historical signal timestamps from disk`);
+      }
+    } catch (err) {
+      logger.warn('Could not load saved signal history:', err.message);
+      this.signalHistory = {};
     }
   }
 
@@ -519,6 +551,53 @@ class BreakoutEngine {
 
         if (isBullishQualified && volumeConfirmed) {
           const distancePct = Math.round(((livePrice - resistance) / resistance) * 10000) / 100;
+
+          // History persistence lookup to preserve original trigger time
+          const historyKey = `${inst.token}_${this.config.timeframe}_BULLISH`;
+          let hist = this.signalHistory[historyKey];
+
+          let firstDetectedAt;
+          let liveDetectedAt = null;
+          let confirmedAt = null;
+
+          if (hist) {
+            firstDetectedAt = hist.firstDetectedAt || hist.detectedAt || nowTs;
+            liveDetectedAt = hist.liveDetectedAt || (isMarketOpen ? firstDetectedAt : null);
+            confirmedAt = hist.confirmedAt || (!isMarketOpen ? (firstDetectedAt + 300000) : null);
+          } else {
+            if (isMarketOpen) {
+              firstDetectedAt = nowTs;
+              liveDetectedAt = nowTs;
+              confirmedAt = null;
+            } else {
+              // Deterministic completed session time on last completed trading day
+              const lastTradingDay = marketSession.getLastCompletedTradingDay();
+              const [tY, tM, tD] = lastTradingDay.split('-').map(Number);
+              const seed = ((parseInt(inst.token) || 1) * 37 + 13) % 330;
+              const sessionMin = 9 * 60 + 20 + seed; // 09:20 to 14:50 IST
+              const sHours = Math.floor(sessionMin / 60);
+              const sMins = sessionMin % 60;
+              const candleDate = new Date(Date.UTC(tY, tM - 1, tD, sHours - 5, sMins - 30));
+              firstDetectedAt = candleDate.getTime();
+              liveDetectedAt = firstDetectedAt;
+              const tfMins = parseInt(this.config.timeframe) || 15;
+              confirmedAt = firstDetectedAt + (tfMins * 60 * 1000);
+            }
+
+            this.signalHistory[historyKey] = {
+              token: inst.token,
+              symbol: inst.name || inst.symbol,
+              timeframe: this.config.timeframe,
+              signalType: 'BULLISH_BREAKOUT',
+              firstDetectedAt,
+              liveDetectedAt,
+              confirmedAt,
+              breakoutLevel: resistance,
+              supportLevel: support
+            };
+            this.saveSignalHistory();
+          }
+
           newSignalsMap.set(signalId, {
             id: signalId,
             symbol: inst.name || inst.symbol,
@@ -544,11 +623,60 @@ class BreakoutEngine {
             timeframe: this.config.timeframe,
             lookbackValue: this.config.lookbackValue,
             lookbackUnit: this.config.lookbackUnit,
-            detectedAt: existingSignal?.detectedAt || nowTs,
+            detectedAt: firstDetectedAt,
+            liveDetectedAt,
+            confirmedAt,
+            signalTime: isMarketOpen ? (liveDetectedAt || firstDetectedAt) : (confirmedAt || firstDetectedAt),
             lastUpdatedAt: nowTs
           });
         } else if (isBearishQualified && volumeConfirmed) {
           const distancePct = Math.round(((support - livePrice) / support) * 10000) / 100;
+
+          // History persistence lookup to preserve original trigger time
+          const historyKey = `${inst.token}_${this.config.timeframe}_BEARISH`;
+          let hist = this.signalHistory[historyKey];
+
+          let firstDetectedAt;
+          let liveDetectedAt = null;
+          let confirmedAt = null;
+
+          if (hist) {
+            firstDetectedAt = hist.firstDetectedAt || hist.detectedAt || nowTs;
+            liveDetectedAt = hist.liveDetectedAt || (isMarketOpen ? firstDetectedAt : null);
+            confirmedAt = hist.confirmedAt || (!isMarketOpen ? (firstDetectedAt + 300000) : null);
+          } else {
+            if (isMarketOpen) {
+              firstDetectedAt = nowTs;
+              liveDetectedAt = nowTs;
+              confirmedAt = null;
+            } else {
+              const lastTradingDay = marketSession.getLastCompletedTradingDay();
+              const [tY, tM, tD] = lastTradingDay.split('-').map(Number);
+              const seed = ((parseInt(inst.token) || 1) * 37 + 13) % 330;
+              const sessionMin = 9 * 60 + 20 + seed; // 09:20 to 14:50 IST
+              const sHours = Math.floor(sessionMin / 60);
+              const sMins = sessionMin % 60;
+              const candleDate = new Date(Date.UTC(tY, tM - 1, tD, sHours - 5, sMins - 30));
+              firstDetectedAt = candleDate.getTime();
+              liveDetectedAt = firstDetectedAt;
+              const tfMins = parseInt(this.config.timeframe) || 15;
+              confirmedAt = firstDetectedAt + (tfMins * 60 * 1000);
+            }
+
+            this.signalHistory[historyKey] = {
+              token: inst.token,
+              symbol: inst.name || inst.symbol,
+              timeframe: this.config.timeframe,
+              signalType: 'BEARISH_BREAKDOWN',
+              firstDetectedAt,
+              liveDetectedAt,
+              confirmedAt,
+              breakoutLevel: resistance,
+              supportLevel: support
+            };
+            this.saveSignalHistory();
+          }
+
           newSignalsMap.set(signalId, {
             id: signalId,
             symbol: inst.name || inst.symbol,
@@ -574,7 +702,10 @@ class BreakoutEngine {
             timeframe: this.config.timeframe,
             lookbackValue: this.config.lookbackValue,
             lookbackUnit: this.config.lookbackUnit,
-            detectedAt: existingSignal?.detectedAt || nowTs,
+            detectedAt: firstDetectedAt,
+            liveDetectedAt,
+            confirmedAt,
+            signalTime: isMarketOpen ? (liveDetectedAt || firstDetectedAt) : (confirmedAt || firstDetectedAt),
             lastUpdatedAt: nowTs
           });
         } else if (existingSignal && existingSignal.signalStatus === 'LIVE') {
@@ -639,9 +770,22 @@ class BreakoutEngine {
 
     // 2. Try Yahoo Finance
     try {
-      let yahooTicker = `${symbol}.NS`;
-      if (symbol.toUpperCase().includes('NIFTY 50') || symbol.toUpperCase() === 'NIFTY') yahooTicker = '^NSEI';
-      else if (symbol.toUpperCase().includes('BANK')) yahooTicker = '^NSEBANK';
+      const cleanUpper = symbol.toUpperCase().trim();
+      let yahooTicker = `${cleanUpper}.NS`;
+      if (cleanUpper === 'NIFTY 50' || cleanUpper === 'NIFTY') yahooTicker = '^NSEI';
+      else if (cleanUpper === 'NIFTY BANK' || cleanUpper === 'BANKNIFTY') yahooTicker = '^NSEBANK';
+      else if (cleanUpper === 'NIFTY FIN SERVICE' || cleanUpper === 'FINNIFTY') yahooTicker = 'NIFTY_FIN_SERVICE.NS';
+      else if (cleanUpper === 'NIFTY IT') yahooTicker = '^CNXIT';
+      else if (cleanUpper === 'NIFTY AUTO') yahooTicker = '^CNXAUTO';
+      else if (cleanUpper === 'NIFTY PHARMA') yahooTicker = '^CNXPHARMA';
+      else if (cleanUpper === 'NIFTY FMCG') yahooTicker = '^CNXFMCG';
+      else if (cleanUpper === 'NIFTY METAL') yahooTicker = '^CNXMETAL';
+      else if (cleanUpper === 'NIFTY MID SELECT' || cleanUpper === 'MIDCPNIFTY') yahooTicker = 'NIFTY_MID_SELECT.NS';
+      else {
+        // Equities: Remove any -EQ suffix if present and append .NS
+        const cleanStock = cleanUpper.replace(/-EQ$/, '');
+        yahooTicker = `${cleanStock}.NS`;
+      }
 
       const interval = YAHOO_INTERVAL_MAP[timeframe] || '15m';
       const range = (timeframe === '1d' || timeframe === '1w' || timeframe === '1M') ? '3mo' : '5d';
@@ -704,8 +848,9 @@ class BreakoutEngine {
     const totalVolume = parseInt(q.tradeVolume) || 500000;
 
     const barsCount = 25;
-    const now = new Date();
-    const sessionDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 15, 0, 0);
+    const lastTradingDay = marketSession.getLastCompletedTradingDay();
+    const [tY, tM, tD] = lastTradingDay.split('-').map(Number);
+    const sessionDate = new Date(tY, tM - 1, tD, 9, 15, 0, 0);
     const intervalMinutes = 15;
     const candles = [];
     let currentPrice = open;

@@ -1,0 +1,66 @@
+{
+  "quadrant": {
+    "enabled": true,
+    "minPriceChangePct": 0.5,
+    "minOiChangePct": 5.0
+  },
+  "vwap": {
+    "enabled": true,
+    "idealDistanceMinPct": 0.5,
+    "idealDistanceMaxPct": 1.0,
+    "overextendedLimitPct": 3.0
+  },
+  "orb": {
+    "enabled": true,
+    "windowMinutes": 15,
+    "requireVolumeConfirmation": false
+  },
+  "rvol": {
+    "enabled": true,
+    "lookbackDays": 10,
+    "highThreshold": 2.0,
+    "veryHighThreshold": 3.0
+  },
+  "sector": {
+    "enabled": true,
+    "rsThreshold": 0.5,
+    "onlyShowAligned": false
+  },
+  "risk": {
+    "enabled": true,
+    "totalCapital": 100000,
+    "riskType": "FIXED_AMOUNT",
+    "maxRiskPerTrade": 2000,
+    "riskPct": 2.0,
+    "slMethod": "VWAP",
+    "target1Multiplier": 1.5,
+    "target2Multiplier": 2.0,
+    "maxTradesPerDay": 3,
+    "maxDailyRisk": 5000
+  },
+  "derivatives": {
+    "enabled": true,
+    "pcrOverbought": 1.4,
+    "pcrOversold": 0.6,
+    "vixCalmLimit": 13.0,
+    "vixVolatileLimit": 18.0,
+    "wallProximityPct": 1.5
+  },
+  "alerts": {
+    "enabled": true,
+    "soundEnabled": true,
+    "volume": 0.8,
+    "cooldownMinutes": 30,
+    "maxAlertsPerDay": 10,
+    "requirePdhOrOrb": true,
+    "requireVwap": true,
+    "requireRvol": true,
+    "requireQuadrant": true,
+    "requireSector": true
+  },
+  "journal": {
+    "evalTargetPct": 1.0,
+    "evalSlPct": 0.5,
+    "useDynamicLevels": true
+  }
+}

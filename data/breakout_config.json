@@ -1,0 +1,13 @@
+{
+  "lookbackValue": 30,
+  "lookbackUnit": "MINUTES",
+  "timeframe": "5m",
+  "minVolumeMultiplier": 3.5,
+  "volumeMode": "TIME_ADJUSTED",
+  "signalType": "BOTH",
+  "signalDisplay": "BOTH",
+  "marketUniverse": "BOTH",
+  "indexVolumeSource": "PRICE_ONLY",
+  "enabled": true,
+  "autoScanIntervalMs": 8000
+}

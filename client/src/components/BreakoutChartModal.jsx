@@ -58,8 +58,9 @@ export default function BreakoutChartModal({ signal, onClose }) {
     }
 
     const container = chartContainerRef.current;
+    const initialWidth = Math.max(300, container.clientWidth || 800);
     const chart = createChart(container, {
-      width: container.clientWidth,
+      width: initialWidth,
       height: 480,
       layout: {
         background: { type: ColorType.Solid, color: '#0d111a' },
@@ -112,48 +113,60 @@ export default function BreakoutChartModal({ signal, onClose }) {
       },
     });
 
-    // Format candle data
-    const formattedCandles = chartData.candles.map(c => {
-      let timeVal = c.timestamp;
-      if (typeof timeVal === 'string') {
-        timeVal = Math.floor(new Date(timeVal).getTime() / 1000);
-      }
-      return {
-        time: timeVal,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-      };
-    }).sort((a, b) => a.time - b.time);
-
-    // Dedup times
+    // Format candle and volume data synchronously with strict ascending time and deduplication
     const dedupedCandles = [];
+    const dedupedVolume = [];
     const seenTimes = new Set();
-    for (const c of formattedCandles) {
-      if (!seenTimes.has(c.time)) {
-        seenTimes.add(c.time);
-        dedupedCandles.push(c);
+
+    const sortedRaw = [...chartData.candles].sort((a, b) => {
+      const tA = typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : a.timestamp;
+      const tB = typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : b.timestamp;
+      return tA - tB;
+    });
+
+    for (const c of sortedRaw) {
+      let timeSec = c.timestamp;
+      if (typeof timeSec === 'string') {
+        timeSec = Math.floor(new Date(timeSec).getTime() / 1000);
+      } else if (timeSec > 1e11) {
+        timeSec = Math.floor(timeSec / 1000);
       }
+
+      if (!timeSec || isNaN(timeSec) || seenTimes.has(timeSec)) continue;
+      seenTimes.add(timeSec);
+
+      const o = Number(c.open);
+      const h = Number(c.high);
+      const l = Number(c.low);
+      const cl = Number(c.close);
+      const v = Number(c.volume) || 0;
+
+      if (isNaN(o) || isNaN(h) || isNaN(l) || isNaN(cl)) continue;
+
+      dedupedCandles.push({
+        time: timeSec,
+        open: o,
+        high: h,
+        low: l,
+        close: cl,
+      });
+
+      const isUp = cl >= o;
+      dedupedVolume.push({
+        time: timeSec,
+        value: v,
+        color: isUp ? 'rgba(16, 185, 129, 0.45)' : 'rgba(239, 68, 68, 0.45)',
+      });
     }
 
-    candleSeries.setData(dedupedCandles);
-
-    // Volume data
-    const formattedVolume = chartData.candles.map(c => {
-      let timeVal = c.timestamp;
-      if (typeof timeVal === 'string') {
-        timeVal = Math.floor(new Date(timeVal).getTime() / 1000);
+    if (dedupedCandles.length > 0) {
+      try {
+        candleSeries.setData(dedupedCandles);
+        volumeSeries.setData(dedupedVolume);
+      } catch (err) {
+        console.warn('Lightweight charts setData error:', err);
       }
-      const isUp = c.close >= c.open;
-      return {
-        time: timeVal,
-        value: c.volume || 0,
-        color: isUp ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)',
-      };
-    }).filter(v => seenTimes.has(v.time));
-
-    volumeSeries.setData(formattedVolume);
+    }
 
     // Add Resistance Level Line (Emerald)
     if (chartData.resistance) {
@@ -178,6 +191,15 @@ export default function BreakoutChartModal({ signal, onClose }) {
         title: `Support: ₹${chartData.support}`,
       });
     }
+
+    chart.timeScale().fitContent();
+
+    requestAnimationFrame(() => {
+      if (chartContainerRef.current && chartInstanceRef.current) {
+        chartInstanceRef.current.applyOptions({ width: chartContainerRef.current.clientWidth || initialWidth });
+        chartInstanceRef.current.timeScale().fitContent();
+      }
+    });
 
     chart.timeScale().fitContent();
 
@@ -319,7 +341,7 @@ export default function BreakoutChartModal({ signal, onClose }) {
             <span>Red line: Historical Support</span>
           </div>
           <div>
-            <span>Detected: {new Date(signal.detectedAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true })} IST</span>
+            <span>Signal Time: {new Date(signal.signalTime || signal.detectedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, day: '2-digit', month: 'short' })} IST</span>
           </div>
         </div>
 

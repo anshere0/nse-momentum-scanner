@@ -13,13 +13,10 @@ pro-suite/client/node_modules/
 **/.env.*
 !**/.env.example
 
-# Build artifacts
-client/dist/
-pro-suite/client/dist/
-**/dist/
-
-# Cache & logs
-data/
+# Cache & large files
+data/*
+!data/breakout_config.json
+!data/breakout_signal_history.json
 *.log
 **/*.log
 .DS_Store
