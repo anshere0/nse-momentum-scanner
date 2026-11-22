@@ -1,179 +1,174 @@
-# NSE Market Momentum & Breadth Scanner (Angel One SmartAPI)
+# 📊 NSE Momentum Scanner & Pro-Suite
 
-An institutional-grade, real-time Indian stock market scanner and quantitative breadth dashboard for NSE Equity and Derivatives (F&O) markets, powered by **Angel One SmartAPI**.
+**Institutional-Grade Real-Time Momentum Scanner, Order Flow Intelligence, and Breakout Detection Suite for the National Stock Exchange (NSE)**
+
+[![Node.js](https://img.shields.io/badge/Backend-Node.js%20%2F%20Express-339933?style=for-the-badge&logo=node.js)](https://nodejs.org/)
+[![React](https://img.shields.io/badge/Frontend-React%2018%20%2F%20Vite-61DAFB?style=for-the-badge&logo=react)](https://react.dev/)
+[![Angel One](https://img.shields.io/badge/Broker_API-Angel_One_SmartAPI-F58220?style=for-the-badge)](https://smartapi.angelbroking.com/)
+[![SSE](https://img.shields.io/badge/Real--Time-Server--Sent_Events-00E5FF?style=for-the-badge)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)
+[![Tailwind CSS](https://img.shields.io/badge/UI-Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css)](https://tailwindcss.com/)
+
+> [!IMPORTANT]
+> **Regulatory & Risk Disclaimer**: This software is an engineering and market analysis platform for educational and simulation purposes. It does not provide financial advice, stock recommendations, or automated trade execution services. Trading Indian equities and derivatives involves substantial risk of loss.
+
+---
+
+## 📌 Executive Summary
+
+Active day traders face information overload when tracking market-wide momentum across the NSE cash and derivatives segments. Traditional charting platforms lag or require manually cycling through watchlists.
+
+**NSE Momentum Scanner** is a dual-tier quantitative market scanning platform:
+1. **Standard Scanner Suite**: Ingests real-time tick streams via **Angel One SmartAPI**, tracks Bhavcopy historical price action, monitors Open Interest (OI) build-up, and detects multi-timeframe breakouts through high-throughput Server-Sent Events (SSE).
+2. **Pro-Suite (`pro-suite/`)**: A modular quantitative engine equipped with:
+   - **RVOL Calculator**: Relative volume surge tracking against 10-day time-of-day baselines.
+   - **VWAP Bands & ORB**: Opening Range Breakout detection with anchored Volume Weighted Average Price standard deviation bands.
+   - **Confidence Scoring Engine**: Algorithmic weighting combining volume, price momentum, open interest, and sector breadth into a unified trade readiness score (0–100).
+   - **Sector Breadth & Risk Engine**: Multi-stock correlation matrices to avoid overexposure to correlated sector selloffs.
+
+---
+
+## 🏗️ System Architecture
+
+```mermaid
+flowchart TD
+    subgraph MarketData["Data Feed Layer"]
+        A["Angel One SmartAPI Gateway"] --> B["Bhavcopy & Master Ingester"]
+        A --> C["SmartAPI WebSocket Feed"]
+    end
+
+    subgraph CoreEngine["Standard Engine (server/)"]
+        B --> D["PDH / PDL & OI Cache"]
+        C --> E["Breakout Engine"]
+        D --> E
+        E -->|"SSE Broadcast"| F["React / Vite Web Client"]
+    end
+
+    subgraph ProSuiteEngine["Pro-Suite Quantitative Engine (pro-suite/)"]
+        C --> G["Candle Service (Multi-Timeframe)"]
+        G --> H["RVOL Engine (Time-of-Day Profile)"]
+        G --> I["VWAP Engine (Volume Weighted Price)"]
+        G --> J["ORB Engine (15m Opening Range)"]
+        H --> K["Confidence Scoring Engine (0-100)"]
+        I --> K
+        J --> K
+        K --> L["Risk & Sector Correlation Engine"]
+        L --> M["Pro-Suite Terminal UI"]
+    end
+```
 
 ---
 
 ## 🌟 Key Features
 
-- **Angel One SmartAPI v2 Integration**:
-  - Secure authentication via Client Code, PIN, and RFC 6238 TOTP.
-  - Streaming tick updates over WebSocket (`wss://smartapisocket.angelone.in/smart-stream`) with Little-Endian binary packet decoding.
-  - REST quote polling and daily historical OHLCV candle loading.
-  - Automatic OpenAPIScripMaster caching and symbol-token resolution.
-- **Session-Aware Previous-Close Engine**:
-  - **Weekend & Holiday Persistence**: Outside market hours (e.g. Saturdays, Sundays, holidays), seamlessly defaults to and displays the most recent completed trading session's final closing snapshot.
-  - Never fabricates prices, never overwrites Friday's data with zeros or stale artifacts on weekends.
-  - IST-aware trading calendar with automated detection of NSE market holidays and pre-open sessions (09:00–09:15 AM IST).
-- **Market Breadth & Sentiment Analysis**:
-  - Real-time advancing, declining, and unchanged counts evaluated against previous session close.
-  - Advance/Decline (A/D) ratio and Net Breadth percentage.
-  - Configurable market sentiment classification: **Positive**, **Negative**, **Sideways**, or **Insufficient Data**.
-- **Dynamic Scanner Configuration Panel**:
-  - **Market Segment Switcher**: Cash Market, F&O Market, or Both.
-  - **Editable Open Interest (OI) Filter**: Real-time adjustable threshold (e.g. +5%, +10%, +20%) with quick presets and direction toggles.
-  - **Technical Price Levels**: Previous Day High (PDH), Previous Day Low (PDL), Previous Month High (PMH), and Previous Month Low (PML) breakout/breakdown detection.
-  - **Market Capitalization & Volume Filters**: Min/Max thresholds with crore/lakh crore units.
-  - **Master Switch & Defaults Reset**: Every filter has an independent enable/disable toggle.
-- **Institutional UI/UX**:
-  - Ultra-sleek dark theme with glassmorphism, responsive layout, and Framer Motion micro-animations.
-  - Dual view modes: **Top Gainers/Losers + Sector Momentum** or **Full Quantitative Scanner Table**.
-  - Symbol search, column sorting, signal alerts, and instant CSV export.
+- **Live Market Telemetry**: Streaming updates pushed via Server-Sent Events (SSE) with automatic reconnection handling.
+- **Angel One SmartAPI Integration**: Session-managed API client with automatic token refreshing and TOTP-based authentication.
+- **Algorithmic Confidence Scoring**:
+  $$\text{Confidence Score} = w_1 \cdot \text{RVOL} + w_2 \cdot \text{VWAP\_Distance} + w_3 \cdot \text{OI\_Surge} + w_4 \cdot \text{Sector\_Breadth}$$
+- **Multi-Baskets**: Support for Nifty 50, Nifty Next 50, F&O Universe, and High-Beta Cash equities.
+- **Dedicated Client Terminals**:
+  - `client/`: Standard high-speed momentum list.
+  - `pro-suite/client/`: Comprehensive institutional terminal with live charts, risk guards, and sector heatmaps.
 
 ---
 
-## 📁 Architecture Overview
+## 📂 Repository Layout
 
-```
-├── client/                     # Vite + React 19 + Tailwind v4 Frontend
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── ConnectBrokerModal.jsx   # Angel One broker session modal
-│   │   │   ├── FilterSettings.jsx       # Comprehensive scanner filters modal
-│   │   │   ├── IndicesBarChart.jsx      # Sector indices momentum bar chart
-│   │   │   ├── MarketOverview.jsx       # Advance/Decline breadth & sentiment cards
-│   │   │   ├── MomentumBoard.jsx        # Top Gainers & Top Losers boards
-│   │   │   └── ScannerTable.jsx         # Full tabular scanner with search & CSV export
-│   │   ├── App.jsx                      # Main dashboard orchestrator
-│   │   └── index.css                    # Design tokens & glassmorphic styles
-│   └── vite.config.js
-├── server/                     # Node.js Express Backend & Market Engine
-│   ├── dataSource/
-│   │   ├── angelone.js                  # Angel One SmartAPI connector (WS + REST)
-│   │   ├── index.js                     # Data source factory
-│   │   └── mock.js                      # Deterministic offline mock engine
-│   ├── routes/
-│   │   ├── api.js                       # Snapshot, config, breadth, health endpoints
-│   │   ├── auth.js                      # Angel One TOTP auth & session management
-│   │   └── sse.js                       # Server-Sent Events real-time broadcast
-│   ├── services/
-│   │   ├── angeloneAuth.js              # TOTP generation, loginByPassword & JWT refresh
-│   │   ├── instrumentMaster.js          # Scrip master downloader, cache & indexer
-│   │   └── marketSession.js             # IST trading calendar, holiday logic & sessions
-│   ├── state/
-│   │   └── marketState.js               # In-memory reactive market state & filter engine
-│   ├── tests/                           # Automated test suite (node:test)
-│   │   ├── authAndReliability.test.js
-│   │   ├── filterAndBreadth.test.js
-│   │   └── marketSession.test.js
-│   └── index.js                         # Application entrypoint
-├── data/                                # Local cached scrip master and session tokens
-└── package.json
+```text
+nse-momentum-scanner/
+├── data/                       # Breakout configuration and stock universes
+├── server/                     # Standard Core Express API & SSE Server
+│   ├── dataSource/             # Angel One & Mock data adapters
+│   ├── routes/                 # API & SSE streaming endpoints
+│   ├── services/               # Breakout engine, Bhavcopy service, Token store
+│   ├── tests/                  # Unit and integration test suites
+│   └── index.js
+├── client/                     # Standard React + Vite Terminal
+│   ├── src/                    # Momentum boards and audio alert components
+│   └── package.json
+├── pro-suite/                  # Advanced Quantitative Pro-Suite
+│   ├── data/                   # Cash universes, sector maps, basket definitions
+│   ├── server/                 # Pro Express backend with quantitative calculators
+│   │   ├── services/           # Candle aggregator, cash universe service
+│   │   ├── utils/              # RVOL, VWAP, ORB, Risk, and Confidence engines
+│   │   └── tests/              # Pro-logic test suites
+│   ├── client/                 # Pro React + Vite Terminal interface
+│   ├── DATA_SOURCES.md         # Data pipeline and field documentation
+│   └── PLAN.md                 # Architecture blueprint
+├── .env.example
+├── package.json
+└── README.md
 ```
 
 ---
 
-## 🔑 Angel One SmartAPI Setup
+## 🚀 Quickstart Guide
 
-1. **Register on SmartAPI**:
-   - Go to [https://smartapi.angelone.in/](https://smartapi.angelone.in/) and sign up or log in.
-2. **Create an App**:
-   - Click **Create an App**.
-   - Select **Trading / Market Feeds**.
-   - Note down your **API Key**.
-3. **Get your TOTP Secret**:
-   - In your Angel One account or profile security settings, enable TOTP authentication (using Google Authenticator or an authenticator app).
-   - Save the secret key (16-32 alphanumeric Base32 characters) as your `ANGEL_TOTP_SECRET`.
-4. **Configure `.env`**:
-   Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-   Fill in your credentials:
-   ```env
-   ANGEL_API_KEY=your_smartapi_key
-   ANGEL_CLIENT_CODE=your_client_code
-   ANGEL_PIN=your_4_digit_pin
-   ANGEL_TOTP_SECRET=your_totp_secret_key
-   DATA_SOURCE=angelone
-   PORT=3000
-   PUBLIC_BASE_URL=http://localhost:3000
-   ```
+### 1. Prerequisites
+- **Node.js**: `v18.x` or higher
+- **npm** or **yarn**
+- **Angel One SmartAPI Account**: (Optional: Mock mode available for testing without live credentials)
 
-> 🔒 **Security Notice**: Credentials are strictly stored server-side. The frontend client and public API responses never expose API keys, client codes, PINs, or JWT tokens.
+### 2. Environment Configuration
+Copy `.env.example` to `.env` in the root and in `pro-suite/`:
 
----
+```env
+PORT=5000
+ANGEL_API_KEY=your-angel-one-api-key
+ANGEL_CLIENT_CODE=your-client-code
+ANGEL_PASSWORD=your-pin-or-password
+ANGEL_TOTP_KEY=your-totp-secret
+DATA_SOURCE=ANGELONE # or MOCK
+```
 
-## 🚀 Getting Started
+### 3. Launching the Standard Suite
 
-### 1. Install Dependencies
-
-Root and server dependencies:
 ```bash
+# Clone the repository
+git clone https://github.com/anshere0/nse-momentum-scanner.git
+cd nse-momentum-scanner
+
+# Install server dependencies & start
 npm install
-```
+npm run server &
 
-Client dependencies:
-```bash
+# Install client dependencies & start
 cd client
 npm install
-cd ..
+npm run dev
 ```
+Open [http://localhost:5173](http://localhost:5173) in your browser.
 
-### 2. Build the Frontend
+### 4. Launching the Pro-Suite
 
 ```bash
-npm run build
-```
+cd pro-suite
 
-### 3. Run the Development Server
+# Start Pro-Suite Server
+npm install
+npm start &
 
-Runs both backend and Vite frontend with hot reload:
-```bash
+# Start Pro-Suite Client
+cd client
+npm install
 npm run dev
 ```
 
-Or start the production server:
-```bash
-npm start
-```
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
 ---
 
-## 🧪 Automated Testing
-
-The repository contains an automated test suite using Node.js built-in `node:test` runner. The tests do not require real broker credentials:
+## 🧪 Running the Verification Test Suite
 
 ```bash
+# Run standard server tests
+npm test
+
+# Run Pro-Suite quantitative logic tests
+cd pro-suite/server
 npm test
 ```
 
-### Test Coverage Highlights:
-- **Session & Weekend Logic**: Verifies that Friday's close is accurately identified and served on Saturday, Sunday, and Monday morning before market open.
-- **Holiday Awareness**: Tests NSE holiday resolution (e.g. Independence Day, Diwali, Gandhi Jayanti).
-- **Session Types**: Confirms `PRE_OPEN` (09:00–09:15), `REGULAR` (09:15–15:30), and `POST_CLOSE` periods.
-- **Previous Month**: Ensures previous completed month calculation has zero look-ahead bias.
-- **Open Interest Math**: Validates OI change % calculation with positive, negative, and zero reference values.
-- **Dynamic Config**: Verifies that OI and technical thresholds can be updated and reset via API without modifying code.
-- **Breadth & Sentiment**: Tests net breadth percentage and sentiment classification (Positive / Negative / Sideways / Insufficient Data).
-- **Authentication & Security**: Validates RFC 6238 TOTP generation, token expiry checks, and ensures no credential exposure.
-
 ---
 
-## 📊 Market-Data Modes
-
-| Mode | Trigger Condition | Display Behavior |
-|------|-------------------|------------------|
-| **Live Market** | Regular trading session (09:15–15:30 IST on trading days) | Streaming WebSocket ticks and live quote evaluations. |
-| **Previous Close** | Outside market hours (weekends, holidays, post-close) | Displays last completed session's closing OHLCV prices and levels. |
-| **Cached Snapshot** | Temporary network interruption | Retains timestamped cached snapshot clearly marked as stale. |
-| **Unavailable** | Broker connection down without cache | Displays explicit data-unavailable status. |
-
----
-
-## 📝 License
-
-MIT
-#   N S E - M A R K E T - S C A N N E R - A N G E L 1  
- 
+## 👤 Author
+**Ansh Arora**  
+- GitHub: [@anshere0](https://github.com/anshere0)  
+- LinkedIn: [Ansh Arora](https://www.linkedin.com/in/ansh-arora0/)
